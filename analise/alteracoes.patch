@@ -1,0 +1,3161 @@
+--- a/.config/dotnet-tools.json
++++ b/.config/dotnet-tools.json
+@@ -0,0 +1,11 @@
++{
++  "version": 1,
++  "isRoot": true,
++  "tools": {
++    "dotnet-ef": {
++      "version": "10.0.12",
++      "commands": ["dotnet-ef"],
++      "rollForward": false
++    }
++  }
++}
+--- a/README.md
++++ b/README.md
+@@ -1,193 +1,101 @@
+ # NeuroCare
+ 
+-Plataforma SaaS (multi-tenant) para acompanhamento longitudinal de pacientes de neurologia.
+-**Status: Etapa 1 do MVP (núcleo). Escrita sem acesso a compilador — veja "Estado de verificação".**
++Aplicação SaaS multi-tenant em C#/.NET 10, ASP.NET Core MVC/Razor, Identity, EF Core e SQL Server. Esta entrega reúne os módulos até a Etapa 5 e as correções descritas em [docs/ALTERACOES.md](docs/ALTERACOES.md).
+ 
+-## Estado de verificação (leia primeiro)
++## Estrutura
+ 
+-Esta base foi gerada em um ambiente **sem .NET SDK e sem acesso ao NuGet**. Portanto:
++- `src/NeuroCare.Domain`: entidades e regras de domínio.
++- `src/NeuroCare.Application`: serviços, DTOs e contratos.
++- `src/NeuroCare.Infrastructure`: EF Core, repositórios, migrations, armazenamento e e-mail.
++- `src/NeuroCare.Web`: páginas MVC/Razor, APIs e worker de lembretes.
++- `tests/NeuroCare.Tests`: testes xUnit com EF InMemory e testes HTTP com TestServer.
+ 
+-- ❌ A solução **não foi compilada** e os **testes não foram executados** por quem a gerou.
+-- ❌ **Migrations não foram geradas** (exigem `dotnet ef`). Sem migrations, o app usa `EnsureCreated` em desenvolvimento.
+-- ❌ Responsividade, rotas e login **não foram testados em navegador**.
+-- ✅ O código foi revisado manualmente e há verificação estática básica (chaves balanceadas, arquivos esperados).
++## Preparação
+ 
+-Primeiro passo no seu computador: `dotnet build && dotnet test`. Pequenos erros de compilação são possíveis; corrija-os antes de avançar.
+-
+-## Versão do .NET
+-
+-**.NET 10 (LTS)** — `net10.0` em `Directory.Build.props`. Se o seu SDK for o .NET 8 (LTS), troque o
+-`TargetFramework` para `net8.0` e as versões `10.0.*` dos pacotes para `8.0.*`.
+-
+-## Requisitos
+-
+-- .NET SDK 10 (ou 8, ver acima)
+-- SQL Server (LocalDB no Windows, ou container via Docker)
+-- `dotnet tool install --global dotnet-ef`
+-
+-## Instalação e execução
++Requisitos: SDK .NET 10 e SQL Server acessível. Na raiz da solução:
+ 
+ ```bash
+-dotnet restore
+-dotnet build
+-dotnet test
++dotnet restore NeuroCare.sln
++dotnet build NeuroCare.sln --no-restore
++dotnet test NeuroCare.sln --no-build --no-restore
++dotnet tool restore
+ ```
+ 
+-### Banco de dados (SQL Server)
++O manifesto `.config/dotnet-tools.json` instala `dotnet-ef` 10.0.12. As referências Microsoft do projeto usam a faixa 10.0.*; mantenha a ferramenta compatível com a versão EF restaurada ao atualizar dependências.
+ 
+-Desenvolvimento no Windows usa LocalDB (`appsettings.Development.json`, sem credenciais).
+-Outro SQL Server: use User Secrets (nunca coloque senha no código):
++Configure a conexão real por User Secrets ou pela variável `ConnectionStrings__DefaultConnection`. Não versione senhas, `.env` ou arquivos de configuração com credenciais reais. A conexão integrada de `appsettings.Development.json` deve ser adaptada ao seu ambiente, especialmente em Linux. Para o `dotnet-ef`, também é possível definir `NEUROCARE_CONNECTION` (somente design-time).
++
++## Banco e atualização desta entrega
+ 
+ ```bash
+-dotnet user-secrets --project src/NeuroCare.Web set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=NeuroCare;User Id=sa;Password=<sua-senha>;TrustServerCertificate=True"
++dotnet ef database update --project src/NeuroCare.Infrastructure --startup-project src/NeuroCare.Web
+ ```
+ 
+-### Migrations (recomendado gerar agora)
++As migrations incluídas são:
+ 
+-```bash
+-export NEUROCARE_CONNECTION="<connection string>"   # design-time
+-dotnet ef migrations add InitialCreate -p src/NeuroCare.Infrastructure -s src/NeuroCare.Web
+-dotnet ef database update -p src/NeuroCare.Infrastructure -s src/NeuroCare.Web
+-```
++1. `20261002232309_Etapa5NotificationsQuestionnairesLgpd`: criação inicial de todo o esquema, com 23 tabelas.
++2. `20261007023438_PreserveQuestionnaireHistory`: adiciona `QuestionnaireResponses.DefinitionSnapshotJson`, anulável, sem apagar registros.
+ 
+-Em Development, `Database:AutoInitialize=true` aplica migrations se existirem; se não existirem, usa `EnsureCreated`.
+-Ao gerar a primeira migration, **apague o banco de dev criado por `EnsureCreated`** antes de aplicá-la.
+-Em produção, aplique migrations explicitamente (nunca `AutoInitialize`).
++Se o banco já registra a primeira migration em `__EFMigrationsHistory`, aplique apenas a atualização pendente pelo comando acima. Um banco criado anteriormente por `EnsureCreated` exige avaliação e baseline compatível antes de usar migrations; não aplique a migration inicial sobre tabelas existentes nem apague dados para contornar conflitos. Faça backup antes de atualizar um banco em uso.
+ 
+-### Executar
++`Database:AutoInitialize=true` chama `MigrateAsync` na inicialização. Use atualização controlada e mantenha essa opção desabilitada em produção. A entrega também contém o script SQL incremental em `analise/migration-preserve-questionnaire-history.sql`, quando distribuída no ZIP; ele parte da migration inicial já aplicada.
++
++Respostas novas guardam a definição do instrumento utilizada. Antes de editar um questionário da clínica, respostas antigas ainda sem essa cópia recebem a definição anterior, dentro da mesma gravação. Mudanças realizadas antes desta atualização não podem ser reconstruídas automaticamente.
++
++## Execução local
+ 
+ ```bash
+ dotnet run --project src/NeuroCare.Web --launch-profile https
+ ```
+ 
+-### Docker (opcional, apenas local)
++Acesse `https://localhost:7180` ou `http://localhost:5180`. Para HTTPS local, configure o certificado de desenvolvimento do .NET conforme seu sistema.
++
++O Compose é uma alternativa para desenvolvimento local:
+ 
+ ```bash
+-cp .env.example .env   # preencha os valores
+-docker compose up --build   # http://localhost:8080
++cp .env.example .env
++# Preencha MSSQL_SA_PASSWORD e SEED_DEMO_PASSWORD no .env.
++docker compose up --build
+ ```
+ 
+-## Usuários de demonstração (FICTÍCIOS — trocar/remover antes de produção)
++A aplicação fica em `http://localhost:8080`. O Compose habilita ambiente Development, seed fictício e log de e-mails. Ajuste a implantação antes de uso real. Os volumes persistem banco e documentos.
+ 
+-Senha: valor de `Seed:DemoPassword` (em `appsettings.Development.json` para dev local, ou `SEED_DEMO_PASSWORD` no Docker).
++## Configurações
+ 
+-| Usuário | Papel | Organização |
+-|---|---|---|
+-| admin@neurocare.local | Administrator | — (sem acesso clínico) |
+-| clinica@neurocare.local | ClinicAdmin | Clínica Demo A |
+-| medico@neurocare.local | Doctor | Clínica Demo A |
+-| medico.b@neurocare.local | Doctor | Clínica Demo B |
+-| paciente@neurocare.local | Patient | Clínica Demo A |
++Variáveis de ambiente usam `__` no lugar de `:` (por exemplo, `Seed__Enabled`).
+ 
+-Teste manual de isolamento: entre como `medico@` e confirme que "Paulo Fernandes" (Org B) não aparece; `medico.b@` vê só ele.
++| Chave | Uso |
++| --- | --- |
++| `ConnectionStrings:DefaultConnection` | Conexão do SQL Server. |
++| `Database:AutoInitialize` | Aplicação de migrations no startup; padrão geral false. |
++| `Seed:Enabled` / `Seed:DemoPassword` | Dados fictícios e senha das contas locais. |
++| `App:PublicBaseUrl` | Origem dos links de e-mail; obrigatória fora de Development. |
++| `Email:From` / `Email:Smtp:*` | Remetente e servidor SMTP. |
++| `Email:UseLogSender` | Registra links de e-mail no log; habilite apenas localmente. |
++| `Storage:RootPath` | Diretório dos documentos fora de `wwwroot`. |
++| `Storage:MaxFileBytes` | Limite de arquivo; padrão 10 MiB. |
++| `Notifications:Enabled` | Ativa o worker de lembretes. |
++| `Notifications:WorkerIntervalSeconds` | Intervalo de varredura; padrão 60 s. |
++| `Notifications:AppointmentLeadHours` | Antecedência dos lembretes de consulta; padrão 24 h. |
++| `Notifications:RequireConsent` | Exige consentimento para lembretes; padrão true. |
+ 
+-## O que a Etapa 1 entrega
++O arquivo Development fornecido contém uma senha explicitamente fictícia de demonstração. Altere ou remova antes de usar dados reais. Contas locais: `admin@neurocare.local`, `clinica@neurocare.local`, `medico@neurocare.local`, `medico.b@neurocare.local` e `paciente@neurocare.local`. A senha é a configurada em `Seed:DemoPassword`.
+ 
+-- ASP.NET Core Identity (Guid), papéis, login/logout, alterar senha, bloqueio por tentativas, e-mail confirmado obrigatório
+-- Organizações + **multi-tenancy**: filtro global do EF Core por `OrganizationId`, guarda de escrita no `SaveChanges`, verificação nos serviços (`AccessGuard`)
+-- Pacientes (CRUD, CPF validado e mascarado, busca, ativar/desativar) e página de detalhes com abas
+-- Consultas (agendar, editar, confirmar, concluir, falta, cancelar; conflito de horário)
+-- Dashboard do médico (saudação, cards, consultas de hoje, gráfico Chart.js, pacientes recentes)
+-- Portal do paciente (`/PatientPortal`): consultas próprias
+-- Auditoria (login, visualização/criação/alteração de paciente, consultas) sem dados clínicos
+-- API somente leitura com DTOs: `/api/patients`, `/api/appointments`
+-- Segurança: antiforgery global, cookies HttpOnly/Secure, CSP e demais headers, rate limiting no login, `/health`
+-- Testes: CPF, domínio, isolamento entre organizações, autorização (paciente A × B, sem permissão), auditoria, consultas
++## Módulos e acesso
+ 
+-## Etapa 2 – contas, e-mail e administração (também NÃO compilada)
++- Administrator: administração da plataforma, sem organização e sem acesso clínico.
++- ClinicAdmin: gestão da clínica, usuários, pacientes, consultas e definições de questionários; sem acesso ao prontuário.
++- Doctor: acompanhamento clínico dos pacientes da organização.
++- Patient: portal com dados próprios, registros e consentimentos.
+ 
+-- **Esqueci minha senha / redefinir senha** (`/Account/ForgotPassword`, `/Account/ResetPassword`): resposta idêntica exista o e-mail ou não, rate limiting, token de uso único.
+-- **Cadastro por convite** (sem auto-cadastro, adequado a dados de saúde): o usuário criado recebe um e-mail com link para definir a senha; ao definir, o e-mail passa a confirmado.
+-- **Administrator** (`/Organizations`): lista, cria (com o primeiro ClinicAdmin, que recebe convite), desativa/reativa organizações. Desativar encerra as sessões da organização e bloqueia novos logins.
+-- **ClinicAdmin** (`/Users`): cria médicos e outros administradores da clínica, desativa/reativa, reenvia convite. Não vê nem altera usuários de outras organizações; não desativa a si mesmo.
+-- **Convite ao portal do paciente**: botão na página do paciente (exige e-mail cadastrado).
+-- **E-mail**: `Email:Smtp:*` + `Email:From` (senha via User Secrets ou variável de ambiente). Em desenvolvimento, `Email:UseLogSender=true` **grava o e-mail (com o link) no log** em vez de enviar; veja o console para pegar o link do convite. Fora de Development, `App:PublicBaseUrl` é obrigatória (evita host header injection nos links).
++Implementados: agenda, pacientes, evoluções SOAP e adendos, medicamentos com horários de lembrete editáveis, sintomas, crises, quedas, instrumentos internos e questionários por clínica, documentos, timeline, relatórios com impressão pelo navegador, alertas e lembretes por e-mail, consentimentos e exportação LGPD. Os módulos clínicos do profissional são acessados a partir do paciente; definições da clínica possuem item próprio no menu. O paciente acessa quedas, questionários, documentos e LGPD pelo menu.
+ 
+-```bash
+-dotnet user-secrets --project src/NeuroCare.Web set "Email:Smtp:Host" "smtp.exemplo.com"
+-dotnet user-secrets --project src/NeuroCare.Web set "Email:From" "no-reply@exemplo.com"
+-dotnet user-secrets --project src/NeuroCare.Web set "Email:Smtp:User" "<usuario>"
+-dotnet user-secrets --project src/NeuroCare.Web set "Email:Smtp:Password" "<senha>"
+-```
++O histórico de questionários preserva perguntas, opções, título, pontuação máxima e restrição de aplicação profissional da versão respondida. Os títulos também são usados em dashboard, timeline e relatório. A exportação LGPD inclui a definição histórica quando disponível.
+ 
+-Limitações conhecidas: o token de redefinição vale 24 h (padrão do Identity); `SmtpClient` (System.Net.Mail) é simples e funcional, mas MailKit é recomendado em produção;
+-sem 2FA; criação de usuário e do registro de médico não são atômicas (falha rara deixaria um usuário sem registro de médico).
++## Validação e limites
+ 
+-## Etapa 3 – módulo clínico (também NÃO compilada)
++Consulte [docs/ALTERACOES.md](docs/ALTERACOES.md) e, no ZIP, `analise/validacao-atualizada.md` e o resultado TRX. Os testes usam banco em memória e servidor HTTP de testes. A migration foi gerada pelo EF, seu script SQL foi conferido e o modelo verificado; não foi aplicada a um SQL Server real neste ambiente. Envio SMTP real e paginação visual da impressão também não foram validados. A deduplicação SMTP possui a janela de falha descrita em `docs/ALTERACOES.md`.
+ 
+-- **Evolução clínica SOAP** (`/ClinicalNotes`): rascunho → **assinatura** → imutável; correções por **adendo** (qualquer médico da organização). Só o autor edita/assina. Somente médicos leem evoluções (ClinicAdmin e pacientes não).
+-- **Medicamentos** (`/Medications`): médico prescreve, suspende, retoma e finaliza; bloqueia duplicidade de nome em uso/suspenso; paciente só consulta os próprios. **Não há checagem de interações medicamentosas.**
+-- **Sintomas** (`/Symptoms`) e **Crises** (`/Seizures`): diários registrados pelo médico ou pelo próprio paciente (intensidade 0–10; duração em segundos), com gráfico (Chart.js). Sem exclusão (registro clínico). O sistema apenas registra e exibe — **não interpreta nem sugere diagnóstico**.
+-- **Linha do tempo** (`/Timeline`): consultas, evoluções (só médico), medicamentos, sintomas e crises.
+-- **Regra de segurança central:** quando o usuário é paciente, o alvo é sempre ele mesmo (o `patientId` da URL é ignorado), o que impede ler/gravar dados de outro paciente.
+-- Auditoria de leitura e escrita clínica, sem conteúdo clínico nos logs.
+-- **Nova migration necessária:** esta etapa adiciona tabelas (`ClinicalNotes`, `ClinicalNoteAddenda`, `Medications`, `SymptomRecords`, `SeizureEvents`). Se você usa `EnsureCreated`, apague o banco de desenvolvimento e rode de novo; se usa migrations, gere `dotnet ef migrations add ClinicalModule`.
++Antes de produção ainda são necessários, entre outros, revisão de implantação e segurança, estratégia de backups, 2FA, proteção das dependências CDN e avaliação de antivírus/criptografia do armazenamento. Assinaturas clínicas são bloqueios lógicos, não certificados digitais. Mobile, planos/assinaturas comerciais e IA assistiva permanecem no roadmap. Os instrumentos internos não substituem diagnóstico clínico; instrumentos sujeitos a licença devem ser avaliados antes de inclusão.
+ 
+-Pendências desta etapa: vínculo evolução↔consulta, registro de adesão (“tomei o remédio”), quedas, exames, questionários/escalas, anexos, exportação de prontuário e assinatura digital com certificado (hoje “assinar” é um travamento lógico com data/autor, sem valor de assinatura eletrônica qualificada).
+-
+-## Etapa 4 (parte 1) – quedas e questionários com pontuação (também NÃO compilada)
+-
+-- **Quedas** (`/Falls`): diário (situação, local, lesão, atendimento médico) registrado pelo médico ou pelo próprio paciente, com gráfico mensal; aparece na linha do tempo.
+-- **Questionários** (`/Questionnaires`): motor genérico de pontuação por soma, com histórico e gráfico de evolução. Catálogo atual (instrumentos de uso livre): **PHQ-9**, **GAD-7**, **Rankin modificada (mRS)** e **Hoehn e Yahr simplificada** (os dois últimos são aplicados pelo profissional).
+-- **Item de segurança do PHQ-9:** resposta positiva ao item 9 (pensamentos de se ferir) gera (a) mensagem de apoio ao paciente com CVV 188 e SAMU 192 e (b) alerta no dashboard do **médico**. **Não há notificação automática** (e-mail/push) nem avaliação de risco pelo sistema — isso depende do módulo de notificações e de um protocolo clínico definido pela clínica.
+-- A pontuação mostra valor e faixa; **não é diagnóstico**. Auditoria registra apenas metadados (sem pontuação ou respostas).
+-- **Instrumentos licenciados** (MDS-UPDRS, MoCA, MMSE etc.) **não foram incluídos** por direitos autorais; só devem ser adicionados com autorização do detentor.
+-- Limitação: o catálogo é definido em código (adicionar um instrumento exige deploy). Um construtor de questionários por organização (tabelas no banco) fica para etapa futura. Pontuações por soma simples; escalas com regras especiais (subescalas, pesos, itens invertidos) exigirão extensão do motor.
+-- **Nova migration:** tabelas `FallEvents` e `QuestionnaireResponses`.
+-
+-## Etapa 4 (partes 2 e 3) – documentos e relatório (também NÃO compilada)
+-
+-- **Documentos** (`/Documents`): upload de PDF, JPG e PNG (até 10 MB; `Storage:MaxFileBytes`) por médico ou pelo próprio paciente.
+-  - Tipo validado **pelo conteúdo** (assinatura do arquivo) e pela extensão — um executável renomeado para `.pdf` é recusado.
+-  - O nome enviado **nunca** vira caminho: o arquivo é gravado com uma chave gerada pelo sistema (`org/paciente/guid`), fora de `wwwroot`.
+-  - Download sempre como anexo; hash SHA-256 guardado; exclusão **lógica** (somente médico; o arquivo físico é mantido para retenção).
+-  - Acesso por organização; paciente só vê os próprios; administrador da clínica não acessa documentos clínicos.
+-  - Configure `Storage:RootPath` com caminho absoluto em volume persistente **com backup** (no Docker já há o volume `neurocare-uploads`).
+-- **Relatório** (`/Reports`, só médico): resumo do prontuário (identificação, medicamentos em uso, últimas evoluções assinadas, sintomas, crises, quedas, escalas, documentos) em página própria para impressão. O botão **Imprimir / Salvar como PDF** usa o recurso do navegador (não há geração de PDF no servidor). O relatório apenas consolida dados registrados, sem interpretação.
+-- Documentos entram na linha do tempo. **Nova migration:** tabela `PatientDocuments`.
+-
+-Limitações: arquivos **não são criptografados pela aplicação** (use criptografia de disco/volume) e **não há antivírus** (integrar um scanner antes de produção); upload na memória (adequado ao limite de 10 MB); se o banco falhar após a gravação do arquivo pode sobrar um arquivo órfão; só PDF/JPG/PNG (sem DICOM nem Word); relatório sem assinatura digital nem PDF gerado no servidor.
+-
+-## Ainda NÃO implementado (próximas etapas)
+-
+-Exames, anexos, evolução SOAP, medicamentos, sintomas, crises, quedas,
+-Parkinson/AVC, questionários genéricos, documentos (`IFileStorageService`), timeline, notificações, consentimentos LGPD,
+-exportação/anonimização, relatórios (`IReportService`), assinaturas/planos, IA (`IAssistantService`), JWT para mobile,
+-observabilidade além do `/health`. Nada disso foi simulado: ficam para as próximas etapas.
+-
+-Configuração de IA, armazenamento e e-mail: **não aplicável ainda** (serão adicionadas com seus módulos).
+-
+-## Roadmap
+-
+-- **Fase 1 – MVP** (Etapa 1 concluída; restante em andamento)
+-- **Fase 2** – Aplicativo mobile
+-- **Fase 3** – Parkinson/Epilepsia/AVC avançados
+-- **Fase 4** – IA (apoio administrativo, sempre com revisão profissional)
+-- **Fase 5** – Integrações
+-- **Fase 6** – Hospitais
+-- **Fase 7** – Pesquisa clínica
+-- **Fase 8** – Analytics e NeuroData
+-
+-Detalhes em `/docs`.
+-
+-## Etapa 5 — banco existente
+-
+-A Etapa 5 adiciona as tabelas `ClinicQuestionnaires`, `ConsentRecords` e `NotificationDispatches`, além das colunas `ReminderEnabled` e `ReminderTimes` em `Medications`.
+-
+-Este repositório continua seguindo a decisão original: quando não existem migrations, `DbInitializer` usa `EnsureCreated`, que **não altera um banco já criado**. Portanto:
+-
+-- para desenvolvimento descartável, recrie o banco e deixe `Database:AutoInitialize=true`; ou
+-- para preservar dados, gere/aplique uma migration EF Core antes de executar esta versão em uma base existente.
+-
+-Configuração de notificações:
+-
+-```json
+-"Notifications": {
+-  "Enabled": true,
+-  "WorkerIntervalSeconds": 60,
+-  "AppointmentLeadHours": 24,
+-  "RequireConsent": true
+-}
+-```
+-
+-Lembretes de medicação usam horários locais no formato `HH:mm`, separados por vírgula (ex.: `08:00,20:00`).
++Mais detalhes: [arquitetura](docs/ARCHITECTURE.md), [banco](docs/DATABASE.md), [segurança](docs/SECURITY.md), [roadmap](docs/ROADMAP.md) e [APIs](docs/API.md).
+--- a/docs/ALTERACOES.md
++++ b/docs/ALTERACOES.md
+@@ -0,0 +1,43 @@
++# Alterações desta entrega
++
++## Login
++
++O botão de exibir senha agora aponta para `#Password`. O JavaScript ignora alvos vazios/ausentes e mantém os ícones SVG da tela de login ao alternar a visibilidade, o estado acessível e o texto de ajuda. A redefinição de senha mantém seu comportamento.
++
++## Medicamentos
++
++O formulário compartilhado de criação/edição expõe `ReminderEnabled` e `ReminderTimes` com validação. Uma edição de dose mantém os horários enviados pelo formulário; o usuário pode desabilitar explicitamente o lembrete. A listagem informa os horários quando habilitados. O envio continua sujeito às configurações e ao consentimento.
++
++## Questionários e histórico
++
++`QuestionnaireResponse.DefinitionSnapshotJson` registra a definição usada na resposta. Resultados e históricos usam essa versão, incluindo título, opções, pontuação máxima e restrição profissional. Dashboard, timeline e relatório resolvem também instrumentos da clínica. A exportação LGPD inclui a cópia histórica.
++
++Antes de editar uma definição da clínica, o serviço preenche respostas legadas ainda sem cópia com a definição anterior, dentro do tenant atual e no mesmo SaveChanges da alteração. Questionários inativos continuam disponíveis para histórico, mas não para novas respostas. Alterações anteriores à atualização, sem definição histórica salva, não podem ser recuperadas automaticamente.
++
++A migration `20261007023438_PreserveQuestionnaireHistory` adiciona apenas a coluna anulável à tabela de respostas. Atualize o banco conforme o README antes de executar a aplicação atualizada. O ZIP contém o script incremental gerado pelo EF para revisão.
++
++## Navegação e instruções
++
++O menu do paciente inclui quedas, questionários, documentos e LGPD. O menu profissional inclui as definições de questionários da clínica; os módulos por paciente permanecem acessíveis pelo cadastro do paciente. Placeholders “em breve” foram removidos. README, arquitetura, banco, segurança e roadmap foram alinhados ao código. O manifesto local permite restaurar `dotnet-ef`.
++
++## Upload e impressão
++
++A tela de upload carrega a validação de tamanho no cliente e usa o limite efetivo de `IFileStorage`. A validação de conteúdo/tamanho no servidor permanece obrigatória. O CSS de impressão oculta os menus e controles, reduz margens e orienta que títulos, linhas de tabela e seções do relatório permaneçam agrupados. A paginação final ainda depende do navegador e do conteúdo.
++
++## Faixas, alertas e limite de acesso
++
++Faixas de pontuação devem cobrir continuamente o intervalo, sem lacunas nem sobreposição. O rate limit de dez requisições por minuto é separado pelo IP da conexão; login, recuperação e redefinição compartilham a cota de cada IP. Atrás de proxy, a implantação deve configurar encaminhamento de IP apenas de proxies confiáveis; o código não confia diretamente em headers enviados pelo cliente.
++
++Alertas de instrumentos personalizados utilizam mensagem genérica sobre o item de segurança. A orientação de crise do PHQ-9 para o paciente, incluindo CVV e SAMU, permanece disponível. O dashboard descreve o envio de alertas e lembretes sem afirmar ausência de contato automático.
++
++## Lembretes
++
++O worker consulta organizações e pacientes ativos, confirma que o usuário pertence à organização do paciente e exige consentimento concedido na versão atual do catálogo quando configurado. Consultas e medicamentos são percorridos em lotes ordenados de 1.000, sem o corte global anterior. Envios já registrados como Sent continuam deduplicados.
++
++SMTP e a gravação de Sent não participam de uma transação distribuída: uma falha após aceitação do e-mail e antes da gravação pode produzir duplicata em nova tentativa. A eliminação dessa janela requer um provedor com idempotência de entrega e política operacional de reconciliação; este ZIP não promete entrega exatamente uma vez. Essa limitação foi registrada sem substituir falhas de envio por sucesso ou descartar lembretes silenciosamente.
++
++## Verificação
++
++Foram adicionados testes de preservação histórica, isolamento entre organizações no preenchimento legado, inatividade, restrição profissional, títulos nas demais telas e edição de lembretes. Testes HTTP exercitam o formulário Razor com antiforgery o menu do paciente, o limite por IP, o upload configurado e os textos de alerta. Testes do worker verificam consentimento, inatividade, destinatário, deduplicação e paginação além dos limites antigos. O script DOM verifica a alternância de senha usando o JavaScript e o botão reais das views.
++
++Consulte `analise/validacao-atualizada.md` na entrega para os resultados executados. SQL Server, SMTP reais e paginação visual da impressão não foram validados neste ambiente. A análise original é um registro anterior às correções e mantém outras limitações para trabalho futuro; as limitações remanescentes de produção estão descritas acima e no README.
+--- a/docs/API.md
++++ b/docs/API.md
+@@ -1,10 +1,10 @@
+-# API (Etapa 1, somente leitura)
++# API (somente leitura)
+ 
+-Autenticação: cookie do Identity (401/403 em JSON para `/api`). JWT para mobile está no roadmap.
++Autenticação: cookie do Identity. Falhas de autenticação/autorização devolvem status 401/403 para `/api`, sem redirecionar para HTML; o cookie não gera corpo JSON nessas respostas. JWT para mobile está no roadmap.
+ 
+ - `GET /api/patients?term=` — perfil `ClinicalStaff`; retorna `PatientListItemDto[]`
+ - `GET /api/patients/{id}` — `PatientDetailsDto` (CPF mascarado)
+ - `GET /api/appointments?from=&to=&doctorId=` — clínicos veem a organização; paciente vê apenas as próprias
+ 
+ Erros: `ProblemDetails` (404/403) e `ValidationProblemDetails` (400). A API nunca retorna entidades do EF.
+-Endpoints de escrita e os demais módulos (`medications`, `symptoms`, `seizures`, `questionnaires`, `documents`, `notifications`) virão com seus módulos.
++Endpoints de escrita e APIs dos demais módulos permanecem futuros. Os módulos clínicos já incluídos nesta entrega são acessados pelos controllers MVC; sua existência não implica uma API pública correspondente.
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -15,19 +15,22 @@
+ 3. **Administrator** da plataforma não tem organização e, portanto, não vê dados clínicos.
+ 4. **Datas em UTC** no banco; conversão para America/Sao_Paulo via `IClock`.
+ 5. DTOs de aplicação também servem de modelo de formulário nesta etapa (simplificação consciente).
+-6. Sem migrations geradas: ver README.
++6. Migrations versionadas: criação inicial do esquema e atualização incremental do histórico de questionários; ver README.
+ 
+ ## Etapa 5 — extensões
+ 
+ ### Notificações
+ - `ReminderWorker` executa em background e usa `IgnoreQueryFilters()` somente para varrer tenants; cada envio mantém `OrganizationId` e destinatário explícitos.
+-- `NotificationDispatch` fornece idempotência para lembretes de consulta e medicação.
++- `NotificationDispatch` deduplica ocorrências com envio registrado; SMTP e persistência não são atômicos (ver docs/ALTERACOES.md).
++- O worker processa lotes ordenados, filtra organização/paciente ativos, valida o tenant do usuário destinatário e exige a versão atual do consentimento quando configurado.
+ - Alertas de segurança de questionário são enviados ao médico responsável após a resposta ser persistida; falha SMTP não desfaz o registro clínico.
+ - E-mails não carregam respostas do questionário nem detalhes clínicos além do mínimo necessário.
+ 
+ ### Questionários por clínica
+ - `ClinicQuestionnaire` armazena definição JSON por organização.
+ - A chave é imutável após criação para preservar o vínculo com respostas históricas.
++- Cada resposta nova registra a definição JSON utilizada em `DefinitionSnapshotJson`. Resultados, histórico, dashboard, timeline e relatório consultam essa cópia antes da definição atual.
++- Ao editar uma definição, respostas legadas sem cópia recebem a definição anterior em uma única gravação com a alteração, respeitando o tenant atual. Não é possível recuperar versões perdidas antes desta entrega.
+ - Instrumentos internos do catálogo e instrumentos da clínica são resolvidos pelo mesmo `IQuestionnaireDefinitionProvider`.
+ - Questionários inativos deixam de aceitar novas respostas, mas permanecem resolvíveis no histórico.
+ 
+--- a/docs/DATABASE.md
++++ b/docs/DATABASE.md
+@@ -6,7 +6,7 @@
+ - FKs com `Restrict`. `Appointments`: CHECK de duração 5–240 min.
+ - Índices: `OrganizationId`, `(OrganizationId, Cpf)` único, `ResponsibleDoctorId`, `CreatedAt`, `PatientId`, `(DoctorId, StartsAtUtc)`, `(OrganizationId, StartsAtUtc)`, `AuditLogs(OccurredAt)`.
+ - `CreatedAt/UpdatedAt` preenchidos automaticamente no `SaveChanges`.
+-- Entidades planejadas (MedicalRecord, Medication, SeizureEvent, Questionnaire*, Document, Consent, Plan, Subscription etc.) entram nas próximas etapas.
++- Os módulos clínicos das etapas seguintes descritos abaixo já estão incluídos. Planos e assinaturas comerciais permanecem futuros.
+ 
+ ## Etapa 3
+ Tabelas: ClinicalNotes (SOAP, status, SignedAtUtc), ClinicalNoteAddenda, Medications, SymptomRecords (CHECK intensidade 0–10), SeizureEvents (CHECK duração 1–86400 s).
+@@ -18,3 +18,11 @@
+ 
+ ## Etapa 4 (partes 2 e 3)
+ PatientDocuments: metadados (título, categoria, nome original sanitizado, tipo detectado, tamanho, SHA-256, `StorageKey` único, exclusão lógica). O binário fica no armazenamento de arquivos (`Storage:RootPath`), fora do banco.
++
++## Etapa 5 e migrations
++
++`ClinicQuestionnaires` guarda definições por organização; `ConsentRecords` guarda consentimentos versionados; `NotificationDispatches` registra envios/idempotência. A migration inicial `20261002232309_Etapa5NotificationsQuestionnairesLgpd` cria o esquema completo (23 tabelas, incluindo Identity).
++
++A atualização `20261007023438_PreserveQuestionnaireHistory` adiciona `QuestionnaireResponses.DefinitionSnapshotJson` (`nvarchar(max)`, anulável). Respostas novas armazenam a definição utilizada. Antes de uma edição de questionário da clínica, respostas legadas sem cópia recebem a definição anterior no mesmo SaveChanges. O filtro de organização limita o preenchimento ao tenant atual. Respostas legadas de instrumentos internos continuam usando o catálogo quando não possuem cópia.
++
++O startup utiliza `MigrateAsync` quando `Database:AutoInitialize=true`; não utiliza `EnsureCreated`. Bancos legados sem histórico de migrations exigem baseline planejado. Consulte o README antes de atualizar um banco existente.
+--- a/docs/ROADMAP.md
++++ b/docs/ROADMAP.md
+@@ -1,10 +1,15 @@
+ # Roadmap
+ 
+-Fase 1 MVP (Etapa 1 concluída: identidade, tenants, pacientes, consultas, dashboard, auditoria, portal básico) → restante: prontuário, medicamentos, sintomas, eventos,
+-questionários, documentos, timeline, notificações, LGPD, relatórios, assinaturas.
+-Fase 2 Mobile · Fase 3 Parkinson/Epilepsia/AVC avançados · Fase 4 IA assistiva · Fase 5 Integrações · Fase 6 Hospitais · Fase 7 Pesquisa · Fase 8 Analytics/NeuroData.
++## Incluído nesta entrega
+ 
+-## Etapa 5 implementada
+-- Notificações: alerta de segurança ao médico responsável; lembrete de consulta; lembrete de medicação por horários configuráveis; idempotência de envio.
+-- Questionários por clínica: CRUD de definição armazenada no banco, perguntas/opções/faixas de pontuação e item de segurança.
+-- LGPD: consentimentos versionados/revogáveis e exportação dos dados pelo portal do paciente.
++Identidade e convites, organizações, pacientes, consultas, dashboard, auditoria, portal, evoluções SOAP, medicamentos, sintomas, crises, quedas, questionários, documentos, timeline, relatórios, notificações e LGPD. Questionários por clínica incluem definição JSON e preservação da versão histórica em cada resposta. Medicamentos possuem horários configuráveis de lembrete.
++
++## Próximas evoluções
++
++- Preparação para produção: implantação, observabilidade, backups, revisão de isolamento e segurança, 2FA, proteção das dependências CDN e avaliação de antivírus/criptografia.
++- Planos e assinaturas comerciais; assinatura digital com certificado quando aplicável.
++- Aplicativo mobile e autenticação adequada à API.
++- Módulos avançados de Parkinson, epilepsia e AVC.
++- IA assistiva, integrações, hospitais, pesquisa e analytics/NeuroData, com validação e governança adequadas.
++
++A análise da versão original, entregue em `analise/`, também registra limitações técnicas que devem orientar novas modificações.
+--- a/docs/SECURITY.md
++++ b/docs/SECURITY.md
+@@ -2,7 +2,7 @@
+ 
+ Implementado: Identity com hash seguro, política de senha (10+ caracteres), lockout (5 tentativas/15 min), e-mail confirmado obrigatório,
+ antiforgery global, cookie HttpOnly/SameSite/Secure (Secure sempre fora de Development), CSP + nosniff + X-Frame-Options + Referrer/Permissions-Policy,
+-rate limiting em `/Account/Login`, autorização por papel/política, isolamento por tenant, auditoria sem dados clínicos, secrets fora do código.
++rate limiting por IP de conexão em login, recuperação e redefinição de senha, autorização por papel/política, isolamento por tenant, auditoria sem dados clínicos, secrets fora do código.
+ 
+ Pendências: SRI/hospedagem local de Bootstrap/Chart.js (hoje via CDN), 2FA, JWT/refresh para mobile, forwarded headers atrás de proxy,
+ revisão de segurança independente e teste de intrusão antes de produção.
+@@ -11,7 +11,7 @@
+ - Sem auto-cadastro: contas nascem de convite; mensagens genéricas ("E-mail indisponível") e resposta idêntica em "esqueci minha senha" evitam enumeração de usuários.
+ - Links de e-mail usam `App:PublicBaseUrl` (obrigatória fora de Development) — sem host header injection.
+ - Tokens de redefinição: Data Protection do Identity, uso único, codificados em Base64Url.
+-- Desativar usuário/organização atualiza o SecurityStamp; sessões caem em até 1 minuto.
++- Desativar usuário/organização atualiza o SecurityStamp; a revalidação do SecurityStamp ocorre a cada 10 minutos.
+ - `LogEmailSender` (que registra links no log) só é registrado com `Email:UseLogSender=true` — nunca habilitar em produção.
+ 
+ ## Etapa 3 (dados clínicos)
+--- a/src/NeuroCare.Application/ClinicQuestionnaireService.cs
++++ b/src/NeuroCare.Application/ClinicQuestionnaireService.cs
+@@ -47,7 +47,8 @@
+ }
+ 
+ public class ClinicQuestionnaireService(
+-    IClinicQuestionnaireRepository repository, IUnitOfWork uow, AccessGuard guard, IAuditService audit) : IClinicQuestionnaireService
++    IClinicQuestionnaireRepository repository, IUnitOfWork uow, AccessGuard guard, IAuditService audit,
++    IQuestionnaireResponseRepository responses) : IClinicQuestionnaireService
+ {
+     public async Task<IReadOnlyList<ClinicQuestionnaireListItemDto>> ListAsync(CancellationToken ct = default)
+     {
+@@ -101,7 +102,9 @@
+         var normalized = NormalizeKey(dto.Key);
+         if (!string.Equals(normalized, q.Key, StringComparison.OrdinalIgnoreCase))
+             throw new RequestValidationException(nameof(dto.Key), "A chave não pode ser alterada depois que o questionário é criado.");
++        var previousDefinition = JsonSerializer.Serialize(QuestionnaireDefinitionProvider.ToDefinition(q));
+         Apply(dto, q.Key, q);
++        await responses.PreserveLegacyDefinitionsAsync(q.Key, previousDefinition, ct);
+         await uow.SaveChangesAsync(ct);
+         await audit.RecordAsync(new AuditEntry("QuestionnaireDefinition.Update", nameof(ClinicQuestionnaire), q.Id.ToString()), ct);
+     }
+@@ -156,8 +159,12 @@
+         if (bands.Any(b => b.Min > b.Max || string.IsNullOrWhiteSpace(b.Label)))
+             throw new RequestValidationException(nameof(SaveClinicQuestionnaireDto.Bands), "Faixas de pontuação inválidas.");
+         for (var i = 1; i < bands.Count; i++)
++        {
+             if (bands[i].Min <= bands[i - 1].Max)
+                 throw new RequestValidationException(nameof(SaveClinicQuestionnaireDto.Bands), "As faixas de pontuação não podem se sobrepor.");
++            if ((long)bands[i].Min > (long)bands[i - 1].Max + 1)
++                throw new RequestValidationException(nameof(SaveClinicQuestionnaireDto.Bands), "As faixas de pontuação não podem deixar lacunas.");
++        }
+         if (bands[0].Min > min || bands[^1].Max < max)
+             throw new RequestValidationException(nameof(SaveClinicQuestionnaireDto.Bands), $"As faixas devem cobrir toda a pontuação possível ({min} a {max}).");
+         return bands;
+--- a/src/NeuroCare.Application/ClinicalAbstractions.cs
++++ b/src/NeuroCare.Application/ClinicalAbstractions.cs
+@@ -42,6 +42,7 @@
+     Task<IReadOnlyList<QuestionnaireResponse>> ListByPatientAsync(Guid patientId, string? key, DateTime sinceUtc, CancellationToken ct = default);
+     Task<IReadOnlyList<QuestionnaireResponse>> ListSafetyFlagsAsync(DateTime sinceUtc, int take, CancellationToken ct = default);
+     Task AddAsync(QuestionnaireResponse response, CancellationToken ct = default);
++    Task PreserveLegacyDefinitionsAsync(string key, string definitionJson, CancellationToken ct = default);
+ }
+ 
+ public interface IDocumentRepository
+--- a/src/NeuroCare.Application/DashboardService.cs
++++ b/src/NeuroCare.Application/DashboardService.cs
+@@ -9,7 +9,8 @@
+ 
+ public class DashboardService(
+     IPatientRepository patients, IDoctorRepository doctors, IAppointmentRepository appointments,
+-    IQuestionnaireResponseRepository questionnaires, AccessGuard guard, IClock clock) : IDashboardService
++    IQuestionnaireResponseRepository questionnaires, AccessGuard guard, IClock clock,
++    IQuestionnaireDefinitionProvider definitions) : IDashboardService
+ {
+     public async Task<DashboardDto> GetAsync(CancellationToken ct = default)
+     {
+@@ -35,8 +36,15 @@
+         if (guard.IsDoctor)
+         {
+             var flagged = await questionnaires.ListSafetyFlagsAsync(nowUtc.AddDays(-30), 5, ct);
+-            alerts = flagged.Select(r => new SafetyAlertDto(r.Id, r.PatientId, r.Patient?.DisplayName ?? "",
+-                QuestionnaireCatalog.Find(r.QuestionnaireKey)?.Title ?? r.QuestionnaireKey, clock.ToLocal(r.AnsweredAtUtc))).ToList();
++            var definitionMap = (await definitions.ListAsync(true, ct))
++                .ToDictionary(x => x.Definition.Key, x => x.Definition, StringComparer.OrdinalIgnoreCase);
++            alerts = flagged.Select(r =>
++            {
++                definitionMap.TryGetValue(r.QuestionnaireKey, out var currentDefinition);
++                var definition = QuestionnaireHistory.Snapshot(r) ?? currentDefinition;
++                return new SafetyAlertDto(r.Id, r.PatientId, r.Patient?.DisplayName ?? "",
++                    definition?.Title ?? r.QuestionnaireKey, clock.ToLocal(r.AnsweredAtUtc));
++            }).ToList();
+         }
+ 
+         return new DashboardDto(
+--- a/src/NeuroCare.Application/LgpdService.cs
++++ b/src/NeuroCare.Application/LgpdService.cs
+@@ -74,7 +74,7 @@
+             symptoms = snapshot.Symptoms.Select(x => new { x.OccurredAtUtc, x.Type, x.Intensity, x.Notes }),
+             seizures = snapshot.Seizures.Select(x => new { x.OccurredAtUtc, x.DurationSeconds, x.Type, x.LossOfConsciousness, x.Trigger, x.Notes }),
+             falls = snapshot.Falls.Select(x => new { x.OccurredAtUtc, x.Circumstance, x.Location, x.Injury, x.NeededMedicalCare, x.Notes }),
+-            questionnaires = snapshot.Questionnaires.Select(x => new { x.QuestionnaireKey, x.AnsweredAtUtc, x.AnswersJson, x.TotalScore, x.BandLabel }),
++            questionnaires = snapshot.Questionnaires.Select(x => new { x.QuestionnaireKey, x.AnsweredAtUtc, x.AnswersJson, x.TotalScore, x.BandLabel, x.DefinitionSnapshotJson }),
+             documents = snapshot.Documents.Select(x => new { x.Title, x.Category, x.OriginalFileName, x.ContentType, x.SizeBytes, x.Sha256, x.CreatedAt }),
+             consents = snapshot.Consents.Select(x => new { x.PurposeKey, x.PurposeText, x.Version, x.Status, x.GrantedAtUtc, x.RevokedAtUtc })
+         };
+--- a/src/NeuroCare.Application/QuestionnaireHistory.cs
++++ b/src/NeuroCare.Application/QuestionnaireHistory.cs
+@@ -0,0 +1,13 @@
++using System.Text.Json;
++using NeuroCare.Domain;
++
++namespace NeuroCare.Application;
++
++/// <summary>Respostas novas usam a definição registrada; respostas legadas consultam a definição disponível.</summary>
++public static class QuestionnaireHistory
++{
++    public static QuestionnaireDefinition? Snapshot(QuestionnaireResponse response) =>
++        string.IsNullOrWhiteSpace(response.DefinitionSnapshotJson)
++            ? null
++            : JsonSerializer.Deserialize<QuestionnaireDefinition>(response.DefinitionSnapshotJson);
++}
+--- a/src/NeuroCare.Application/QuestionnaireService.cs
++++ b/src/NeuroCare.Application/QuestionnaireService.cs
+@@ -61,6 +61,7 @@
+         {
+             OrganizationId = org, PatientId = patient.Id, QuestionnaireKey = def.Key,
+             AnsweredAtUtc = clock.UtcNow, AnswersJson = JsonSerializer.Serialize(values),
++            DefinitionSnapshotJson = JsonSerializer.Serialize(def),
+             TotalScore = total, BandLabel = def.BandFor(total),
+             SafetyFlag = def.SafetyItemIndex is int idx && values[idx] > 0,
+             RecordedByUserId = user.UserId, RecordedByPatient = guard.IsPatient
+@@ -83,7 +84,10 @@
+         var patient = await context.ResolveAsync(r.PatientId, ct);
+         if (patient.Id != r.PatientId) throw new NotFoundException("Resultado não encontrado."); // paciente tentando ver resultado de outro
+ 
+-        var def = await RequireDefinitionAsync(r.QuestionnaireKey, true, ct);
++        RequireClinicalActor();
++        var def = QuestionnaireHistory.Snapshot(r) ?? await RequireDefinitionAsync(r.QuestionnaireKey, true, ct);
++        if (def.ClinicianOnly && !guard.IsDoctor)
++            throw new ForbiddenException("Instrumento aplicado apenas pelo profissional.");
+         await audit.RecordAsync(new AuditEntry("Questionnaire.View", nameof(QuestionnaireResponse), id.ToString()), ct);
+         return BuildResult(def, r);
+     }
+@@ -100,6 +104,7 @@
+         return list.OrderByDescending(r => r.AnsweredAtUtc).Select(r =>
+         {
+             defs.TryGetValue(r.QuestionnaireKey, out var def);
++            def = QuestionnaireHistory.Snapshot(r) ?? def;
+             return new QuestionnaireResponseListItemDto(r.Id, r.QuestionnaireKey, def?.Title ?? r.QuestionnaireKey,
+                 clock.ToLocal(r.AnsweredAtUtc), r.TotalScore, def?.MaxScore ?? r.TotalScore, r.BandLabel,
+                 r.SafetyFlag, r.RecordedByPatient);
+--- a/src/NeuroCare.Application/ReportService.cs
++++ b/src/NeuroCare.Application/ReportService.cs
+@@ -12,7 +12,8 @@
+     ClinicalContext context, IClinicalNoteRepository notes, IMedicationRepository medications,
+     ISymptomRepository symptoms, ISeizureRepository seizures, IFallRepository falls,
+     IQuestionnaireResponseRepository questionnaires, IDocumentRepository documents,
+-    IOrganizationRepository organizations, AccessGuard guard, IAuditService audit, IClock clock) : IReportService
++    IOrganizationRepository organizations, AccessGuard guard, IAuditService audit, IClock clock,
++    IQuestionnaireDefinitionProvider definitions) : IReportService
+ {
+     public async Task<PatientReportDto> GetPatientSummaryAsync(Guid patientId, int days, CancellationToken ct = default)
+     {
+@@ -42,12 +43,15 @@
+         var fallRows = (await falls.ListByPatientAsync(patient.Id, since, ct))
+             .Select(f => new ReportFallDto(clock.ToLocal(f.OccurredAtUtc), f.Circumstance, f.Injury, f.NeededMedicalCare)).ToList();
+ 
++        var definitionMap = (await definitions.ListAsync(true, ct))
++            .ToDictionary(x => x.Definition.Key, x => x.Definition, StringComparer.OrdinalIgnoreCase);
+         var scales = (await questionnaires.ListByPatientAsync(patient.Id, null, nowUtc.AddYears(-10), ct))
+             .GroupBy(r => r.QuestionnaireKey)
+             .Select(g =>
+             {
+                 var ordered = g.OrderByDescending(r => r.AnsweredAtUtc).ToList();
+-                var def = QuestionnaireCatalog.Find(g.Key);
++                definitionMap.TryGetValue(g.Key, out var currentDefinition);
++                var def = QuestionnaireHistory.Snapshot(ordered[0]) ?? currentDefinition;
+                 return new ReportQuestionnaireDto(def?.Title ?? g.Key, clock.ToLocal(ordered[0].AnsweredAtUtc),
+                     ordered[0].TotalScore, def?.MaxScore ?? ordered[0].TotalScore, ordered[0].BandLabel,
+                     ordered.Count > 1 ? ordered[1].TotalScore : null);
+--- a/src/NeuroCare.Application/TimelineService.cs
++++ b/src/NeuroCare.Application/TimelineService.cs
+@@ -11,7 +11,8 @@
+ public class TimelineService(
+     ClinicalContext context, IAppointmentRepository appointments, IClinicalNoteRepository notes,
+     IMedicationRepository medications, ISymptomRepository symptoms, ISeizureRepository seizures,
+-    IFallRepository falls, IQuestionnaireResponseRepository questionnaires, IDocumentRepository documents, AccessGuard guard, IAuditService audit, IClock clock) : ITimelineService
++    IFallRepository falls, IQuestionnaireResponseRepository questionnaires, IDocumentRepository documents, AccessGuard guard, IAuditService audit, IClock clock,
++    IQuestionnaireDefinitionProvider definitions) : ITimelineService
+ {
+     public async Task<IReadOnlyList<TimelineItemDto>> GetAsync(Guid? patientId, CancellationToken ct = default)
+     {
+@@ -49,10 +50,16 @@
+             items.Add(new TimelineItemDto(clock.ToLocal(f.OccurredAtUtc), TimelineKind.Fall,
+                 "Queda", f.Injury ? $"{f.Circumstance.Label()} · com lesão" : f.Circumstance.Label(), f.Id));
+ 
++        var definitionMap = (await definitions.ListAsync(true, ct))
++            .ToDictionary(x => x.Definition.Key, x => x.Definition, StringComparer.OrdinalIgnoreCase);
+         foreach (var q in await questionnaires.ListByPatientAsync(patient.Id, null, since, ct))
++        {
++            definitionMap.TryGetValue(q.QuestionnaireKey, out var currentDefinition);
++            var definition = QuestionnaireHistory.Snapshot(q) ?? currentDefinition;
+             items.Add(new TimelineItemDto(clock.ToLocal(q.AnsweredAtUtc), TimelineKind.Questionnaire,
+-                $"Questionário: {QuestionnaireCatalog.Find(q.QuestionnaireKey)?.Title ?? q.QuestionnaireKey}",
++                $"Questionário: {definition?.Title ?? q.QuestionnaireKey}",
+                 $"Pontuação {q.TotalScore} – {q.BandLabel}", q.Id));
++        }
+ 
+         foreach (var d in await documents.ListByPatientAsync(patient.Id, ct))
+             items.Add(new TimelineItemDto(clock.ToLocal(d.CreatedAt), TimelineKind.Document,
+--- a/src/NeuroCare.Domain/ClinicalScales.cs
++++ b/src/NeuroCare.Domain/ClinicalScales.cs
+@@ -25,6 +25,8 @@
+     public DateTime AnsweredAtUtc { get; set; }
+     /// <summary>Valores escolhidos, na ordem das perguntas (JSON: [0,1,2,...]).</summary>
+     public string AnswersJson { get; set; } = "[]";
++    /// <summary>Definição usada na resposta; preserva perguntas, opções e pontuação após alterações do catálogo.</summary>
++    public string? DefinitionSnapshotJson { get; set; }
+     public int TotalScore { get; set; }
+     public string BandLabel { get; set; } = "";
+     /// <summary>Resposta positiva ao item de segurança do instrumento (ex.: item 9 do PHQ-9).</summary>
+--- a/src/NeuroCare.Infrastructure/Migrations/20261007023438_PreserveQuestionnaireHistory.Designer.cs
++++ b/src/NeuroCare.Infrastructure/Migrations/20261007023438_PreserveQuestionnaireHistory.Designer.cs
+@@ -0,0 +1,1462 @@
++// <auto-generated />
++using System;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Infrastructure;
++using Microsoft.EntityFrameworkCore.Metadata;
++using Microsoft.EntityFrameworkCore.Migrations;
++using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
++using NeuroCare.Infrastructure;
++
++#nullable disable
++
++namespace NeuroCare.Infrastructure.Migrations
++{
++    [DbContext(typeof(NeuroCareDbContext))]
++    [Migration("20261007023438_PreserveQuestionnaireHistory")]
++    partial class PreserveQuestionnaireHistory
++    {
++        /// <inheritdoc />
++        protected override void BuildTargetModel(ModelBuilder modelBuilder)
++        {
++#pragma warning disable 612, 618
++            modelBuilder
++                .HasAnnotation("ProductVersion", "10.0.12")
++                .HasAnnotation("Relational:MaxIdentifierLength", 128);
++
++            SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("ConcurrencyStamp")
++                        .IsConcurrencyToken()
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<string>("Name")
++                        .HasMaxLength(256)
++                        .HasColumnType("nvarchar(256)");
++
++                    b.Property<string>("NormalizedName")
++                        .HasMaxLength(256)
++                        .HasColumnType("nvarchar(256)");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("NormalizedName")
++                        .IsUnique()
++                        .HasDatabaseName("RoleNameIndex")
++                        .HasFilter("[NormalizedName] IS NOT NULL");
++
++                    b.ToTable("AspNetRoles", (string)null);
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
++                {
++                    b.Property<int>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("int");
++
++                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
++
++                    b.Property<string>("ClaimType")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<string>("ClaimValue")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<Guid>("RoleId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("RoleId");
++
++                    b.ToTable("AspNetRoleClaims", (string)null);
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<System.Guid>", b =>
++                {
++                    b.Property<int>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("int");
++
++                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
++
++                    b.Property<string>("ClaimType")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<string>("ClaimValue")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<Guid>("UserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("UserId");
++
++                    b.ToTable("AspNetUserClaims", (string)null);
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserLogin<System.Guid>", b =>
++                {
++                    b.Property<string>("LoginProvider")
++                        .HasColumnType("nvarchar(450)");
++
++                    b.Property<string>("ProviderKey")
++                        .HasColumnType("nvarchar(450)");
++
++                    b.Property<string>("ProviderDisplayName")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<Guid>("UserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.HasKey("LoginProvider", "ProviderKey");
++
++                    b.HasIndex("UserId");
++
++                    b.ToTable("AspNetUserLogins", (string)null);
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserRole<System.Guid>", b =>
++                {
++                    b.Property<Guid>("UserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("RoleId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.HasKey("UserId", "RoleId");
++
++                    b.HasIndex("RoleId");
++
++                    b.ToTable("AspNetUserRoles", (string)null);
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<System.Guid>", b =>
++                {
++                    b.Property<Guid>("UserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("LoginProvider")
++                        .HasColumnType("nvarchar(450)");
++
++                    b.Property<string>("Name")
++                        .HasColumnType("nvarchar(450)");
++
++                    b.Property<string>("Value")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.HasKey("UserId", "LoginProvider", "Name");
++
++                    b.ToTable("AspNetUserTokens", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.Appointment", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid>("DoctorId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<int>("DurationMinutes")
++                        .HasColumnType("int");
++
++                    b.Property<string>("Notes")
++                        .HasMaxLength(2000)
++                        .HasColumnType("nvarchar(2000)");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("PatientId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime>("StartsAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("Status")
++                        .IsRequired()
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<string>("Type")
++                        .IsRequired()
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("CreatedAt");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("PatientId");
++
++                    b.HasIndex("DoctorId", "StartsAtUtc");
++
++                    b.HasIndex("OrganizationId", "StartsAtUtc");
++
++                    b.ToTable("Appointments", null, t =>
++                        {
++                            t.HasCheckConstraint("CK_Appointments_Duration", "[DurationMinutes] BETWEEN 5 AND 240");
++                        });
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.AuditLog", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Action")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<string>("Details")
++                        .HasMaxLength(500)
++                        .HasColumnType("nvarchar(500)");
++
++                    b.Property<string>("EntityId")
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<string>("EntityName")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<string>("IpAddress")
++                        .HasMaxLength(64)
++                        .HasColumnType("nvarchar(64)");
++
++                    b.Property<DateTime>("OccurredAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid?>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid?>("UserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("OccurredAt");
++
++                    b.HasIndex("UserId");
++
++                    b.HasIndex("OrganizationId", "OccurredAt");
++
++                    b.ToTable("AuditLogs", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.ClinicQuestionnaire", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<bool>("Active")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("BandsJson")
++                        .IsRequired()
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<bool>("ClinicianOnly")
++                        .HasColumnType("bit");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("Description")
++                        .IsRequired()
++                        .HasMaxLength(1000)
++                        .HasColumnType("nvarchar(1000)");
++
++                    b.Property<string>("Key")
++                        .IsRequired()
++                        .HasMaxLength(80)
++                        .HasColumnType("nvarchar(80)");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Prompt")
++                        .IsRequired()
++                        .HasMaxLength(500)
++                        .HasColumnType("nvarchar(500)");
++
++                    b.Property<string>("QuestionsJson")
++                        .IsRequired()
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<int?>("SafetyItemIndex")
++                        .HasColumnType("int");
++
++                    b.Property<string>("Title")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("OrganizationId", "Key")
++                        .IsUnique();
++
++                    b.ToTable("ClinicQuestionnaires", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.ClinicalNote", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Assessment")
++                        .HasMaxLength(4000)
++                        .HasColumnType("nvarchar(4000)");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid>("DoctorId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Objective")
++                        .HasMaxLength(4000)
++                        .HasColumnType("nvarchar(4000)");
++
++                    b.Property<DateTime>("OccurredAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("PatientId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Plan")
++                        .HasMaxLength(4000)
++                        .HasColumnType("nvarchar(4000)");
++
++                    b.Property<DateTime?>("SignedAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("Status")
++                        .IsRequired()
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<string>("Subjective")
++                        .HasMaxLength(4000)
++                        .HasColumnType("nvarchar(4000)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("CreatedAt");
++
++                    b.HasIndex("DoctorId");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("PatientId", "OccurredAtUtc");
++
++                    b.ToTable("ClinicalNotes", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.ClinicalNoteAddendum", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("ClinicalNoteId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid>("DoctorId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Text")
++                        .IsRequired()
++                        .HasMaxLength(2000)
++                        .HasColumnType("nvarchar(2000)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("ClinicalNoteId");
++
++                    b.HasIndex("DoctorId");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.ToTable("ClinicalNoteAddenda", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.ConsentRecord", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid?>("ActorUserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<DateTime>("GrantedAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("PatientId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("PurposeKey")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<string>("PurposeText")
++                        .IsRequired()
++                        .HasMaxLength(1000)
++                        .HasColumnType("nvarchar(1000)");
++
++                    b.Property<DateTime?>("RevokedAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("Status")
++                        .IsRequired()
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("Version")
++                        .IsRequired()
++                        .HasMaxLength(50)
++                        .HasColumnType("nvarchar(50)");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("PatientId", "PurposeKey", "Version", "GrantedAtUtc");
++
++                    b.ToTable("ConsentRecords", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.Doctor", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<bool>("Active")
++                        .HasColumnType("bit");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("FullName")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("LicenseNumber")
++                        .HasMaxLength(30)
++                        .HasColumnType("nvarchar(30)");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Specialty")
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid>("UserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("UserId")
++                        .IsUnique();
++
++                    b.ToTable("Doctors", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.FallEvent", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Circumstance")
++                        .IsRequired()
++                        .HasMaxLength(30)
++                        .HasColumnType("nvarchar(30)");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<bool>("Injury")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("Location")
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<bool>("NeededMedicalCare")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("Notes")
++                        .HasMaxLength(1000)
++                        .HasColumnType("nvarchar(1000)");
++
++                    b.Property<DateTime>("OccurredAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("PatientId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<bool>("RecordedByPatient")
++                        .HasColumnType("bit");
++
++                    b.Property<Guid?>("RecordedByUserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("CreatedAt");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("PatientId", "OccurredAtUtc");
++
++                    b.ToTable("FallEvents", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.Medication", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("Dosage")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<DateTime?>("EndDate")
++                        .HasColumnType("date");
++
++                    b.Property<string>("Frequency")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("Instructions")
++                        .HasMaxLength(1000)
++                        .HasColumnType("nvarchar(1000)");
++
++                    b.Property<string>("Name")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("PatientId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("PrescribedByDoctorId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<bool>("ReminderEnabled")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("ReminderTimes")
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<DateTime>("StartDate")
++                        .HasColumnType("date");
++
++                    b.Property<string>("Status")
++                        .IsRequired()
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("CreatedAt");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("PrescribedByDoctorId");
++
++                    b.HasIndex("PatientId", "Status");
++
++                    b.ToTable("Medications", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.NotificationDispatch", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("ErrorCode")
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<string>("Kind")
++                        .IsRequired()
++                        .HasMaxLength(40)
++                        .HasColumnType("nvarchar(40)");
++
++                    b.Property<string>("OccurrenceKey")
++                        .IsRequired()
++                        .HasMaxLength(80)
++                        .HasColumnType("nvarchar(80)");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("RecipientUserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("ReferenceId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime?>("SentAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("Status")
++                        .IsRequired()
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("OrganizationId", "Kind", "ReferenceId", "RecipientUserId", "OccurrenceKey")
++                        .IsUnique();
++
++                    b.ToTable("NotificationDispatches", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.Organization", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<bool>("Active")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("Address")
++                        .HasMaxLength(300)
++                        .HasColumnType("nvarchar(300)");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("DocumentNumber")
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<string>("Email")
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("LegalName")
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("Name")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("Phone")
++                        .HasMaxLength(30)
++                        .HasColumnType("nvarchar(30)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("CreatedAt");
++
++                    b.ToTable("Organizations", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.Patient", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Address")
++                        .HasMaxLength(300)
++                        .HasColumnType("nvarchar(300)");
++
++                    b.Property<DateTime>("BirthDate")
++                        .HasColumnType("date");
++
++                    b.Property<string>("Cpf")
++                        .IsRequired()
++                        .HasMaxLength(11)
++                        .HasColumnType("nchar(11)")
++                        .IsFixedLength();
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("Email")
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("EmergencyContactName")
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("EmergencyContactPhone")
++                        .HasMaxLength(30)
++                        .HasColumnType("nvarchar(30)");
++
++                    b.Property<string>("FullName")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("Notes")
++                        .HasMaxLength(2000)
++                        .HasColumnType("nvarchar(2000)");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Phone")
++                        .HasMaxLength(30)
++                        .HasColumnType("nvarchar(30)");
++
++                    b.Property<Guid?>("ResponsibleDoctorId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Sex")
++                        .IsRequired()
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<string>("SocialName")
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("Status")
++                        .IsRequired()
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid?>("UserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("CreatedAt");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("ResponsibleDoctorId");
++
++                    b.HasIndex("UserId");
++
++                    b.HasIndex("OrganizationId", "Cpf")
++                        .IsUnique();
++
++                    b.ToTable("Patients", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.PatientDocument", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Category")
++                        .IsRequired()
++                        .HasMaxLength(20)
++                        .HasColumnType("nvarchar(20)");
++
++                    b.Property<string>("ContentType")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<DateTime?>("DeletedAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid?>("DeletedByUserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("OriginalFileName")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<Guid>("PatientId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Sha256")
++                        .IsRequired()
++                        .HasMaxLength(64)
++                        .HasColumnType("nchar(64)")
++                        .IsFixedLength();
++
++                    b.Property<long>("SizeBytes")
++                        .HasColumnType("bigint");
++
++                    b.Property<string>("StorageKey")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<string>("Title")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<bool>("UploadedByPatient")
++                        .HasColumnType("bit");
++
++                    b.Property<Guid?>("UploadedByUserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("StorageKey")
++                        .IsUnique();
++
++                    b.HasIndex("PatientId", "CreatedAt");
++
++                    b.ToTable("PatientDocuments", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.QuestionnaireResponse", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime>("AnsweredAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("AnswersJson")
++                        .IsRequired()
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<string>("BandLabel")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("nvarchar(100)");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("DefinitionSnapshotJson")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("PatientId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("QuestionnaireKey")
++                        .IsRequired()
++                        .HasMaxLength(50)
++                        .HasColumnType("nvarchar(50)");
++
++                    b.Property<bool>("RecordedByPatient")
++                        .HasColumnType("bit");
++
++                    b.Property<Guid?>("RecordedByUserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<bool>("SafetyFlag")
++                        .HasColumnType("bit");
++
++                    b.Property<int>("TotalScore")
++                        .HasColumnType("int");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("CreatedAt");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("PatientId", "AnsweredAtUtc");
++
++                    b.HasIndex("OrganizationId", "SafetyFlag", "AnsweredAtUtc");
++
++                    b.ToTable("QuestionnaireResponses", (string)null);
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.SeizureEvent", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<int>("DurationSeconds")
++                        .HasColumnType("int");
++
++                    b.Property<bool>("LossOfConsciousness")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("Notes")
++                        .HasMaxLength(1000)
++                        .HasColumnType("nvarchar(1000)");
++
++                    b.Property<DateTime>("OccurredAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("PatientId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<bool>("RecordedByPatient")
++                        .HasColumnType("bit");
++
++                    b.Property<Guid?>("RecordedByUserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Trigger")
++                        .HasMaxLength(200)
++                        .HasColumnType("nvarchar(200)");
++
++                    b.Property<string>("Type")
++                        .IsRequired()
++                        .HasMaxLength(30)
++                        .HasColumnType("nvarchar(30)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("CreatedAt");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("PatientId", "OccurredAtUtc");
++
++                    b.ToTable("SeizureEvents", null, t =>
++                        {
++                            t.HasCheckConstraint("CK_SeizureEvents_Duration", "[DurationSeconds] BETWEEN 1 AND 86400");
++                        });
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.SymptomRecord", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<int>("Intensity")
++                        .HasColumnType("int");
++
++                    b.Property<string>("Notes")
++                        .HasMaxLength(1000)
++                        .HasColumnType("nvarchar(1000)");
++
++                    b.Property<DateTime>("OccurredAtUtc")
++                        .HasColumnType("datetime2");
++
++                    b.Property<Guid>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<Guid>("PatientId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<bool>("RecordedByPatient")
++                        .HasColumnType("bit");
++
++                    b.Property<Guid?>("RecordedByUserId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("Type")
++                        .IsRequired()
++                        .HasMaxLength(30)
++                        .HasColumnType("nvarchar(30)");
++
++                    b.Property<DateTime?>("UpdatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("CreatedAt");
++
++                    b.HasIndex("OrganizationId");
++
++                    b.HasIndex("PatientId", "OccurredAtUtc");
++
++                    b.ToTable("SymptomRecords", null, t =>
++                        {
++                            t.HasCheckConstraint("CK_SymptomRecords_Intensity", "[Intensity] BETWEEN 0 AND 10");
++                        });
++                });
++
++            modelBuilder.Entity("NeuroCare.Infrastructure.ApplicationUser", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<int>("AccessFailedCount")
++                        .HasColumnType("int");
++
++                    b.Property<bool>("Active")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("ConcurrencyStamp")
++                        .IsConcurrencyToken()
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<DateTime>("CreatedAt")
++                        .HasColumnType("datetime2");
++
++                    b.Property<string>("Email")
++                        .HasMaxLength(256)
++                        .HasColumnType("nvarchar(256)");
++
++                    b.Property<bool>("EmailConfirmed")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("FullName")
++                        .IsRequired()
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<bool>("LockoutEnabled")
++                        .HasColumnType("bit");
++
++                    b.Property<DateTimeOffset?>("LockoutEnd")
++                        .HasColumnType("datetimeoffset");
++
++                    b.Property<string>("NormalizedEmail")
++                        .HasMaxLength(256)
++                        .HasColumnType("nvarchar(256)");
++
++                    b.Property<string>("NormalizedUserName")
++                        .HasMaxLength(256)
++                        .HasColumnType("nvarchar(256)");
++
++                    b.Property<Guid?>("OrganizationId")
++                        .HasColumnType("uniqueidentifier");
++
++                    b.Property<string>("PasswordHash")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<string>("PhoneNumber")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<bool>("PhoneNumberConfirmed")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("SecurityStamp")
++                        .HasColumnType("nvarchar(max)");
++
++                    b.Property<bool>("TwoFactorEnabled")
++                        .HasColumnType("bit");
++
++                    b.Property<string>("UserName")
++                        .HasMaxLength(256)
++                        .HasColumnType("nvarchar(256)");
++
++                    b.HasKey("Id");
++
++                    b.HasIndex("NormalizedEmail")
++                        .HasDatabaseName("EmailIndex");
++
++                    b.HasIndex("NormalizedUserName")
++                        .IsUnique()
++                        .HasDatabaseName("UserNameIndex")
++                        .HasFilter("[NormalizedUserName] IS NOT NULL");
++
++                    b.ToTable("AspNetUsers", (string)null);
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
++                {
++                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", null)
++                        .WithMany()
++                        .HasForeignKey("RoleId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<System.Guid>", b =>
++                {
++                    b.HasOne("NeuroCare.Infrastructure.ApplicationUser", null)
++                        .WithMany()
++                        .HasForeignKey("UserId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserLogin<System.Guid>", b =>
++                {
++                    b.HasOne("NeuroCare.Infrastructure.ApplicationUser", null)
++                        .WithMany()
++                        .HasForeignKey("UserId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserRole<System.Guid>", b =>
++                {
++                    b.HasOne("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", null)
++                        .WithMany()
++                        .HasForeignKey("RoleId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Infrastructure.ApplicationUser", null)
++                        .WithMany()
++                        .HasForeignKey("UserId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<System.Guid>", b =>
++                {
++                    b.HasOne("NeuroCare.Infrastructure.ApplicationUser", null)
++                        .WithMany()
++                        .HasForeignKey("UserId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.Appointment", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Doctor", "Doctor")
++                        .WithMany()
++                        .HasForeignKey("DoctorId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Patient", "Patient")
++                        .WithMany()
++                        .HasForeignKey("PatientId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.Navigation("Doctor");
++
++                    b.Navigation("Patient");
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.ClinicQuestionnaire", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.ClinicalNote", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Doctor", "Doctor")
++                        .WithMany()
++                        .HasForeignKey("DoctorId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Patient", "Patient")
++                        .WithMany()
++                        .HasForeignKey("PatientId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.Navigation("Doctor");
++
++                    b.Navigation("Patient");
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.ClinicalNoteAddendum", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.ClinicalNote", null)
++                        .WithMany("Addenda")
++                        .HasForeignKey("ClinicalNoteId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Doctor", "Doctor")
++                        .WithMany()
++                        .HasForeignKey("DoctorId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.Navigation("Doctor");
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.ConsentRecord", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Patient", "Patient")
++                        .WithMany()
++                        .HasForeignKey("PatientId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.Navigation("Patient");
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.Doctor", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.FallEvent", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Patient", null)
++                        .WithMany()
++                        .HasForeignKey("PatientId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.Medication", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Patient", "Patient")
++                        .WithMany()
++                        .HasForeignKey("PatientId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Doctor", "PrescribedBy")
++                        .WithMany()
++                        .HasForeignKey("PrescribedByDoctorId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.Navigation("Patient");
++
++                    b.Navigation("PrescribedBy");
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.Patient", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", "Organization")
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Doctor", "ResponsibleDoctor")
++                        .WithMany()
++                        .HasForeignKey("ResponsibleDoctorId")
++                        .OnDelete(DeleteBehavior.Restrict);
++
++                    b.Navigation("Organization");
++
++                    b.Navigation("ResponsibleDoctor");
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.PatientDocument", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Patient", "Patient")
++                        .WithMany()
++                        .HasForeignKey("PatientId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.Navigation("Patient");
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.QuestionnaireResponse", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Patient", "Patient")
++                        .WithMany()
++                        .HasForeignKey("PatientId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.Navigation("Patient");
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.SeizureEvent", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Patient", null)
++                        .WithMany()
++                        .HasForeignKey("PatientId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.SymptomRecord", b =>
++                {
++                    b.HasOne("NeuroCare.Domain.Organization", null)
++                        .WithMany()
++                        .HasForeignKey("OrganizationId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++
++                    b.HasOne("NeuroCare.Domain.Patient", null)
++                        .WithMany()
++                        .HasForeignKey("PatientId")
++                        .OnDelete(DeleteBehavior.Restrict)
++                        .IsRequired();
++                });
++
++            modelBuilder.Entity("NeuroCare.Domain.ClinicalNote", b =>
++                {
++                    b.Navigation("Addenda");
++                });
++#pragma warning restore 612, 618
++        }
++    }
++}
+--- a/src/NeuroCare.Infrastructure/Migrations/20261007023438_PreserveQuestionnaireHistory.cs
++++ b/src/NeuroCare.Infrastructure/Migrations/20261007023438_PreserveQuestionnaireHistory.cs
+@@ -0,0 +1,28 @@
++using Microsoft.EntityFrameworkCore.Migrations;
++
++#nullable disable
++
++namespace NeuroCare.Infrastructure.Migrations
++{
++    /// <inheritdoc />
++    public partial class PreserveQuestionnaireHistory : Migration
++    {
++        /// <inheritdoc />
++        protected override void Up(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.AddColumn<string>(
++                name: "DefinitionSnapshotJson",
++                table: "QuestionnaireResponses",
++                type: "nvarchar(max)",
++                nullable: true);
++        }
++
++        /// <inheritdoc />
++        protected override void Down(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.DropColumn(
++                name: "DefinitionSnapshotJson",
++                table: "QuestionnaireResponses");
++        }
++    }
++}
+--- a/src/NeuroCare.Infrastructure/Migrations/NeuroCareDbContextModelSnapshot.cs
++++ b/src/NeuroCare.Infrastructure/Migrations/NeuroCareDbContextModelSnapshot.cs
+@@ -934,6 +934,9 @@
+                     b.Property<DateTime>("CreatedAt")
+                         .HasColumnType("datetime2");
+ 
++                    b.Property<string>("DefinitionSnapshotJson")
++                        .HasColumnType("nvarchar(max)");
++
+                     b.Property<Guid>("OrganizationId")
+                         .HasColumnType("uniqueidentifier");
+ 
+--- a/src/NeuroCare.Infrastructure/Notifications/ReminderWorker.cs
++++ b/src/NeuroCare.Infrastructure/Notifications/ReminderWorker.cs
+@@ -27,7 +27,7 @@
+         } while (await timer.WaitForNextTickAsync(stoppingToken));
+     }
+ 
+-    private async Task ProcessAsync(CancellationToken ct)
++    public async Task ProcessAsync(CancellationToken ct = default)
+     {
+         using var scope = scopes.CreateScope();
+         var db = scope.ServiceProvider.GetRequiredService<NeuroCareDbContext>();
+@@ -44,51 +44,70 @@
+     {
+         var leadHours = Math.Clamp(config.GetValue("Notifications:AppointmentLeadHours", 24), 1, 168);
+         var to = nowUtc.AddHours(leadHours);
+-        var appointments = await db.Appointments.IgnoreQueryFilters().AsNoTracking()
++        var query = db.Appointments.IgnoreQueryFilters().AsNoTracking()
+             .Where(a => (a.Status == AppointmentStatus.Scheduled || a.Status == AppointmentStatus.Confirmed)
+-                        && a.StartsAtUtc > nowUtc && a.StartsAtUtc <= to)
+-            .Take(1000).ToListAsync(ct);
+-
+-        foreach (var a in appointments)
++                        && a.StartsAtUtc > nowUtc && a.StartsAtUtc <= to
++                        && db.Organizations.Any(o => o.Id == a.OrganizationId && o.Active))
++            .OrderBy(a => a.StartsAtUtc).ThenBy(a => a.Id);
++        const int batchSize = 1000;
++        for (var offset = 0; ; offset += batchSize)
+         {
+-            var patient = await db.Patients.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(p => p.Id == a.PatientId, ct);
+-            if (patient?.UserId is null) continue;
+-            if (config.GetValue("Notifications:RequireConsent", true) && !await HasNotificationConsentAsync(db, patient.Id, ct)) continue;
+-            var recipient = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == patient.UserId && u.Active && u.EmailConfirmed, ct);
+-            if (string.IsNullOrWhiteSpace(recipient?.Email)) continue;
+-            var occurrence = a.StartsAtUtc.ToString("yyyyMMddHHmm");
+-            var template = EmailTemplates.AppointmentReminder(patient.DisplayName, clock.ToLocal(a.StartsAtUtc));
+-            await SendOnceAsync(db, email, a.OrganizationId, NotificationKind.AppointmentReminder, a.Id,
+-                recipient.Id, occurrence, recipient.Email, template, ct);
++            var appointments = await query.Skip(offset).Take(batchSize).ToListAsync(ct);
++            if (appointments.Count == 0) break;
++            foreach (var a in appointments)
++            {
++                var patient = await db.Patients.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(p => p.Id == a.PatientId && p.OrganizationId == a.OrganizationId && p.Status == PatientStatus.Active, ct);
++                if (patient?.UserId is null) continue;
++                if (config.GetValue("Notifications:RequireConsent", true) && !await HasNotificationConsentAsync(db, patient, ct)) continue;
++                var recipient = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == patient.UserId && u.OrganizationId == patient.OrganizationId && u.Active && u.EmailConfirmed, ct);
++                if (string.IsNullOrWhiteSpace(recipient?.Email)) continue;
++                var occurrence = a.StartsAtUtc.ToString("yyyyMMddHHmm");
++                var template = EmailTemplates.AppointmentReminder(patient.DisplayName, clock.ToLocal(a.StartsAtUtc));
++                await SendOnceAsync(db, email, a.OrganizationId, NotificationKind.AppointmentReminder, a.Id,
++                    recipient.Id, occurrence, recipient.Email, template, ct);
++            }
++            if (appointments.Count < batchSize) break;
+         }
+     }
+ 
+     private async Task ProcessMedicationsAsync(NeuroCareDbContext db, IEmailSender email, DateTime nowLocal, CancellationToken ct)
+     {
+-        var meds = await db.Medications.IgnoreQueryFilters().AsNoTracking()
+-            .Where(m => m.Status == MedicationStatus.Active && m.ReminderEnabled && m.ReminderTimes != null)
+-            .Take(5000).ToListAsync(ct);
+-        foreach (var med in meds)
++        var query = db.Medications.IgnoreQueryFilters().AsNoTracking()
++            .Where(m => m.Status == MedicationStatus.Active && m.ReminderEnabled && m.ReminderTimes != null
++                        && db.Organizations.Any(o => o.Id == m.OrganizationId && o.Active))
++            .OrderBy(m => m.Id);
++        const int batchSize = 1000;
++        for (var offset = 0; ; offset += batchSize)
+         {
+-            if (med.StartDate.Date > nowLocal.Date || (med.EndDate.HasValue && med.EndDate.Value.Date < nowLocal.Date)) continue;
+-            var due = ParseTimes(med.ReminderTimes!).Any(t => Math.Abs((nowLocal.TimeOfDay - t).TotalMinutes) <= 2);
+-            if (!due) continue;
+-            var patient = await db.Patients.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(p => p.Id == med.PatientId, ct);
+-            if (patient?.UserId is null) continue;
+-            if (config.GetValue("Notifications:RequireConsent", true) && !await HasNotificationConsentAsync(db, patient.Id, ct)) continue;
+-            var recipient = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == patient.UserId && u.Active && u.EmailConfirmed, ct);
+-            if (string.IsNullOrWhiteSpace(recipient?.Email)) continue;
+-            var matched = ParseTimes(med.ReminderTimes!).OrderBy(t => Math.Abs((nowLocal.TimeOfDay - t).TotalMinutes)).First();
+-            var occurrence = $"{nowLocal:yyyyMMdd}-{matched:hh\\:mm}";
+-            var template = EmailTemplates.MedicationReminder(patient.DisplayName, med.Name, med.Dosage);
+-            await SendOnceAsync(db, email, med.OrganizationId, NotificationKind.MedicationReminder, med.Id,
+-                recipient.Id, occurrence, recipient.Email, template, ct);
++            var meds = await query.Skip(offset).Take(batchSize).ToListAsync(ct);
++            if (meds.Count == 0) break;
++            foreach (var med in meds)
++            {
++                if (med.StartDate.Date > nowLocal.Date || (med.EndDate.HasValue && med.EndDate.Value.Date < nowLocal.Date)) continue;
++                var due = ParseTimes(med.ReminderTimes!).Any(t => Math.Abs((nowLocal.TimeOfDay - t).TotalMinutes) <= 2);
++                if (!due) continue;
++                var patient = await db.Patients.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(p => p.Id == med.PatientId && p.OrganizationId == med.OrganizationId && p.Status == PatientStatus.Active, ct);
++                if (patient?.UserId is null) continue;
++                if (config.GetValue("Notifications:RequireConsent", true) && !await HasNotificationConsentAsync(db, patient, ct)) continue;
++                var recipient = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == patient.UserId && u.OrganizationId == patient.OrganizationId && u.Active && u.EmailConfirmed, ct);
++                if (string.IsNullOrWhiteSpace(recipient?.Email)) continue;
++                var matched = ParseTimes(med.ReminderTimes!).OrderBy(t => Math.Abs((nowLocal.TimeOfDay - t).TotalMinutes)).First();
++                var occurrence = $"{nowLocal:yyyyMMdd}-{matched:hh\\:mm}";
++                var template = EmailTemplates.MedicationReminder(patient.DisplayName, med.Name, med.Dosage);
++                await SendOnceAsync(db, email, med.OrganizationId, NotificationKind.MedicationReminder, med.Id,
++                    recipient.Id, occurrence, recipient.Email, template, ct);
++            }
++            if (meds.Count < batchSize) break;
+         }
+     }
+ 
+-    private static Task<bool> HasNotificationConsentAsync(NeuroCareDbContext db, Guid patientId, CancellationToken ct) =>
+-        db.ConsentRecords.IgnoreQueryFilters().AsNoTracking().AnyAsync(x => x.PatientId == patientId &&
+-            x.PurposeKey == "notifications-email" && x.Status == ConsentStatus.Granted, ct);
++    private static Task<bool> HasNotificationConsentAsync(NeuroCareDbContext db, Patient patient, CancellationToken ct)
++    {
++        var purpose = ConsentPurposeCatalog.Find("notifications-email")!;
++        return db.ConsentRecords.IgnoreQueryFilters().AsNoTracking().AnyAsync(x =>
++            x.OrganizationId == patient.OrganizationId && x.PatientId == patient.Id &&
++            x.PurposeKey == purpose.Key && x.Version == purpose.Version && x.Status == ConsentStatus.Granted, ct);
++    }
+ 
+     private static IEnumerable<TimeSpan> ParseTimes(string value) => value
+         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+--- a/src/NeuroCare.Infrastructure/Repositories/ClinicalRepositories.cs
++++ b/src/NeuroCare.Infrastructure/Repositories/ClinicalRepositories.cs
+@@ -100,6 +100,14 @@
+ 
+     public async Task AddAsync(QuestionnaireResponse response, CancellationToken ct = default) =>
+         await db.QuestionnaireResponses.AddAsync(response, ct);
++
++    public async Task PreserveLegacyDefinitionsAsync(string key, string definitionJson, CancellationToken ct = default)
++    {
++        var legacy = await db.QuestionnaireResponses
++            .Where(r => r.QuestionnaireKey == key && (r.DefinitionSnapshotJson == null || r.DefinitionSnapshotJson == ""))
++            .ToListAsync(ct);
++        foreach (var response in legacy) response.DefinitionSnapshotJson = definitionJson;
++    }
+ }
+ 
+ public class DocumentRepository(NeuroCareDbContext db) : IDocumentRepository
+--- a/src/NeuroCare.Web/Program.cs
++++ b/src/NeuroCare.Web/Program.cs
+@@ -1,6 +1,7 @@
+ using Microsoft.AspNetCore.RateLimiting;
+ using Microsoft.AspNetCore.Identity;
+ using Microsoft.AspNetCore.Mvc;
++using System.Threading.RateLimiting;
+ using NeuroCare.Application;
+ using NeuroCare.Domain;
+ using NeuroCare.Infrastructure;
+@@ -71,12 +72,13 @@
+ builder.Services.AddRateLimiter(o =>
+ {
+     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+-    o.AddFixedWindowLimiter("login", x =>
+-    {
+-        x.PermitLimit = 10;
+-        x.Window = TimeSpan.FromMinutes(1);
+-        x.QueueLimit = 0;
+-    });
++    o.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(
++        context.Connection.RemoteIpAddress?.MapToIPv6().ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions
++        {
++            PermitLimit = 10,
++            Window = TimeSpan.FromMinutes(1),
++            QueueLimit = 0
++        }));
+ });
+ 
+ builder.Services.AddHealthChecks().AddDbContextCheck<NeuroCareDbContext>("database");
+@@ -118,4 +120,6 @@
+ if (app.Configuration.GetValue<bool>("Database:AutoInitialize"))
+     await DbInitializer.InitializeAsync(app.Services, app.Configuration, app.Logger);
+ 
+-app.Run();+app.Run();
++
++public partial class Program { }
+--- a/src/NeuroCare.Web/Views/Account/Login.cshtml
++++ b/src/NeuroCare.Web/Views/Account/Login.cshtml
+@@ -145,7 +145,7 @@
+                         <!-- BOTÃO MOSTRAR SENHA -->
+                         <button type="button"
+                                 class="neurocare-password-button"
+-                                data-toggle-password
++                                data-toggle-password="#Password"
+                                 aria-label="Mostrar senha"
+                                 aria-pressed="false"
+                                 title="Mostrar senha">
+@@ -317,4 +317,4 @@
+ {
+     <script src="~/js/password-toggle.js"
+             asp-append-version="true"></script>
+-}+}
+--- a/src/NeuroCare.Web/Views/Documents/Upload.cshtml
++++ b/src/NeuroCare.Web/Views/Documents/Upload.cshtml
+@@ -1,4 +1,5 @@
+ @model UploadDocumentDto
++@inject IFileStorage Storage
+ @{ ViewData["Title"] = "Enviar documento"; }
+ <partial name="_ClinicalHeader" />
+ <h2 class="h5 mb-3">Enviar documento</h2>
+@@ -7,8 +8,14 @@
+     <div class="row g-3">
+         <div class="col-md-6"><label asp-for="Title" class="form-label">Título</label><input asp-for="Title" class="form-control" placeholder="ex.: Ressonância de crânio" /></div>
+         <div class="col-md-3"><label asp-for="Category" class="form-label">Categoria</label><select asp-for="Category" asp-items="EnumText.DocumentCategoryItems()" class="form-select"></select></div>
+-        <div class="col-12"><label for="file" class="form-label">Arquivo (PDF, JPG ou PNG, até 10 MB)</label>
+-            <input id="file" name="file" type="file" class="form-control" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" /></div>
++        <div class="col-12"><label for="file" class="form-label">Arquivo (PDF, JPG ou PNG, até @((Storage.MaxFileBytes / 1048576d).ToString("0.##")) MiB)</label>
++            <input id="file" name="file" type="file" class="form-control" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
++                   data-max-bytes="@Storage.MaxFileBytes" data-error-target="file-error" aria-describedby="file-error" />
++            <div id="file-error" class="text-danger small d-none" role="alert"></div>
++        </div>
+     </div>
+     <div class="mt-4 d-flex gap-2"><button class="btn btn-primary" type="submit">Enviar</button><a class="btn btn-outline-secondary" asp-action="Index" asp-route-patientId="@ViewData["PatientId"]">Cancelar</a></div>
+ </form>
++@section Scripts {
++    <script src="~/js/upload-check.js" asp-append-version="true"></script>
++}
+--- a/src/NeuroCare.Web/Views/Home/Index.cshtml
++++ b/src/NeuroCare.Web/Views/Home/Index.cshtml
+@@ -29,7 +29,7 @@
+             </li>
+         }
+         </ul>
+-        <div class="small mt-2">Revise o caso com o paciente. O sistema não faz avaliação de risco nem contata o paciente automaticamente.</div>
++        <div class="small mt-2">Revise o caso com o paciente. O sistema não faz avaliação de risco. O alerta pode notificar o médico responsável por e-mail; lembretes ao paciente seguem as configurações e o consentimento.</div>
+     </div>
+ }
+ 
+--- a/src/NeuroCare.Web/Views/Medications/Index.cshtml
++++ b/src/NeuroCare.Web/Views/Medications/Index.cshtml
+@@ -17,7 +17,7 @@
+     {
+         <tr>
+             <td><strong>@m.Name</strong>@if (!string.IsNullOrEmpty(m.Instructions)) { <div class="small text-muted">@m.Instructions</div> }<div class="small text-muted">Prescrito por @m.PrescribedBy</div></td>
+-            <td>@m.Dosage<div class="small text-muted">@m.Frequency</div></td>
++            <td>@m.Dosage<div class="small text-muted">@m.Frequency</div>@if (m.ReminderEnabled) { <div class="small text-muted">Lembretes: @m.ReminderTimes</div> }</td>
+             <td>@m.StartDate.ToString("dd/MM/yyyy")@(m.EndDate.HasValue ? " → " + m.EndDate.Value.ToString("dd/MM/yyyy") : "")</td>
+             <td><span class="badge @m.Status.MedicationBadge()">@m.Status.Label()</span></td>
+             @if (isDoctor)
+--- a/src/NeuroCare.Web/Views/Medications/_Form.cshtml
++++ b/src/NeuroCare.Web/Views/Medications/_Form.cshtml
+@@ -6,4 +6,6 @@
+     <div class="col-md-3"><label asp-for="StartDate" class="form-label">Início</label><input asp-for="StartDate" type="date" class="form-control" /><span asp-validation-for="StartDate" class="text-danger small"></span></div>
+     <div class="col-md-3"><label asp-for="EndDate" class="form-label">Fim (opcional)</label><input asp-for="EndDate" type="date" class="form-control" /><span asp-validation-for="EndDate" class="text-danger small"></span></div>
+     <div class="col-12"><label asp-for="Instructions" class="form-label">Orientações</label><textarea asp-for="Instructions" rows="2" class="form-control"></textarea></div>
++    <div class="col-md-4 d-flex align-items-center"><div class="form-check"><input asp-for="ReminderEnabled" class="form-check-input" /><label asp-for="ReminderEnabled" class="form-check-label">Habilitar lembretes por e-mail</label></div></div>
++    <div class="col-md-8"><label asp-for="ReminderTimes" class="form-label">Horários dos lembretes</label><input asp-for="ReminderTimes" class="form-control" placeholder="08:00,20:00" /><span asp-validation-for="ReminderTimes" class="text-danger small"></span><div class="form-text">Use horários de Brasília no formato HH:mm, separados por vírgula. O paciente deve autorizar os lembretes em Privacidade e LGPD quando o consentimento for exigido.</div></div>
+ </div>
+--- a/src/NeuroCare.Web/Views/Questionnaires/Result.cshtml
++++ b/src/NeuroCare.Web/Views/Questionnaires/Result.cshtml
+@@ -10,15 +10,22 @@
+     @if (isDoctor)
+     {
+         <div class="alert alert-danger" role="alert">
+-            <strong>Atenção:</strong> o paciente respondeu positivamente ao item de segurança deste questionário (pensamentos de se ferir). Revise o caso com o paciente.
++            <strong>Atenção:</strong> o paciente respondeu positivamente ao item de segurança deste questionário. Revise o caso com o paciente.
+         </div>
+     }
+-    else
++    else if (string.Equals(Model.Key, "phq9", StringComparison.OrdinalIgnoreCase))
+     {
+         <div class="alert alert-danger" role="alert">
+             <strong>Você não está sozinho(a).</strong> Se você está pensando em se machucar, procure ajuda agora:
+             ligue para o <strong>CVV, 188</strong> (24 horas, gratuito) ou para o <strong>SAMU, 192</strong>, ou vá ao serviço de saúde mais próximo.
+             Avise também alguém de confiança e a sua equipe de saúde.
++        </div>
++    }
++    else
++    {
++        <div class="alert alert-warning" role="alert">
++            Sua resposta marcou o item de segurança deste questionário. Entre em contato com sua equipe de saúde para orientação.
++            Se houver uma emergência, procure atendimento imediato ou ligue para o SAMU, 192.
+         </div>
+     }
+ }
+--- a/src/NeuroCare.Web/Views/Shared/_Layout.cshtml
++++ b/src/NeuroCare.Web/Views/Shared/_Layout.cshtml
+@@ -200,32 +200,10 @@
+                         }
+ 
+ 
+-                        @foreach (var soon in new[]
+-                        {
+-                            "Questionários",
+-                            "Medicamentos",
+-                            "Documentos",
+-                            "Relatórios"
+-                        })
+-                        {
+-
+-                            <li class="nav-item">
+-
+-                                <span class="nav-link disabled">
+-
+-                                    @soon
+-
+-                                    <small class="badge text-bg-light">
+-
+-                                        em breve
+-
+-                                    </small>
+-
+-                                </span>
+-
+-                            </li>
+-
+-                        }
++                        <li class="nav-item">
++                            <a class="nav-link @Active("ClinicQuestionnaires")"
++                               asp-controller="ClinicQuestionnaires" asp-action="Index">Questionários da clínica</a>
++                        </li>
+ 
+                     }
+ 
+@@ -296,6 +274,10 @@
+ 
+                         </li>
+ 
++                        <li class="nav-item"><a class="nav-link @Active("Falls")" asp-controller="Falls" asp-action="Index">Quedas</a></li>
++                        <li class="nav-item"><a class="nav-link @Active("Questionnaires")" asp-controller="Questionnaires" asp-action="Index">Questionários</a></li>
++                        <li class="nav-item"><a class="nav-link @Active("Documents")" asp-controller="Documents" asp-action="Index">Documentos</a></li>
++                        <li class="nav-item"><a class="nav-link @Active("Lgpd")" asp-controller="Lgpd" asp-action="Index">Privacidade e LGPD</a></li>
+                     }
+ 
+                     else if (User.IsInRole(Roles.Administrator))
+@@ -434,4 +416,4 @@
+ 
+ </body>
+ 
+-</html>+</html>
+--- a/src/NeuroCare.Web/wwwroot/css/site.css
++++ b/src/NeuroCare.Web/wwwroot/css/site.css
+@@ -115,3 +115,17 @@
+ .pre-wrap {
+     white-space: pre-wrap;
+ }
++
++@media print {
++    @page { margin: 15mm; }
++    body { background: #fff; }
++    .no-print, .app-sidebar, body > .navbar { display: none !important; }
++    .app-shell { display: block; min-height: 0; }
++    .app-content { padding: 0 !important; }
++    .app-content > article { padding: 0 !important; border: 0 !important; }
++    .report-section { break-inside: avoid; page-break-inside: avoid; }
++    h1, h2, h3 { break-after: avoid; }
++    thead { display: table-header-group; }
++    tr { break-inside: avoid; }
++    .pre-wrap { overflow-wrap: anywhere; }
++}
+--- a/src/NeuroCare.Web/wwwroot/js/password-toggle.js
++++ b/src/NeuroCare.Web/wwwroot/js/password-toggle.js
+@@ -7,12 +7,17 @@
+     var STETHOSCOPE = '\u{1FA7A}';                        // 🩺
+ 
+     document.querySelectorAll('[data-toggle-password]').forEach(function (button) {
+-        var input = document.querySelector(button.getAttribute('data-toggle-password'));
++        var selector = button.getAttribute('data-toggle-password');
++        if (!selector) return;
++        var input = document.querySelector(selector);
+         if (!input) return;
+ 
+         function render(visible) {
+             input.type = visible ? 'text' : 'password';
+-            button.textContent = STETHOSCOPE + (visible ? VISIBLE : HIDDEN);
++            button.classList.toggle('is-visible', visible);
++            if (!button.querySelector('.password-eye')) {
++                button.textContent = STETHOSCOPE + (visible ? VISIBLE : HIDDEN);
++            }
+             button.setAttribute('aria-pressed', visible ? 'true' : 'false');
+             button.setAttribute('aria-label', visible ? 'Ocultar senha' : 'Mostrar senha');
+             button.title = visible ? 'Ocultar senha' : 'Mostrar senha';
+--- a/src/NeuroCare.Web/wwwroot/js/upload-check.js
++++ b/src/NeuroCare.Web/wwwroot/js/upload-check.js
+@@ -12,7 +12,7 @@
+             var mb = function (n) { return (n / 1048576).toFixed(1).replace('.', ','); };
+             input.value = '';
+             if (target) {
+-                target.textContent = 'O arquivo tem ' + mb(file.size) + ' MB e o limite é ' + Math.round(max / 1048576) + ' MB. Reduza o arquivo e tente novamente.';
++                target.textContent = 'O arquivo tem ' + mb(file.size) + ' MiB e o limite é ' + mb(max) + ' MiB. Reduza o arquivo e tente novamente.';
+                 target.classList.remove('d-none');
+             }
+         } else if (target) {
+--- a/tests/NeuroCare.Tests/ClinicalTests.cs
++++ b/tests/NeuroCare.Tests/ClinicalTests.cs
+@@ -42,14 +42,14 @@
+         Medications = new MedicationService(ctx, medRepo, db, guard, audit, Base.Clock);
+         Symptoms = new SymptomService(ctx, symRepo, db, guard, user, audit, Base.Clock);
+         Seizures = new SeizureService(ctx, szRepo, db, guard, user, audit, Base.Clock);
+-        Timeline = new TimelineService(ctx, appts, noteRepo, medRepo, symRepo, szRepo, fallRepo, qRepo, docRepo, guard, audit, Base.Clock);
++        var definitionProvider = new QuestionnaireDefinitionProvider(new ClinicQuestionnaireRepository(db), guard);
++        Timeline = new TimelineService(ctx, appts, noteRepo, medRepo, symRepo, szRepo, fallRepo, qRepo, docRepo, guard, audit, Base.Clock, definitionProvider);
+         Falls = new FallService(ctx, fallRepo, db, guard, user, audit, Base.Clock);
+-        var definitionProvider = new QuestionnaireDefinitionProvider(new ClinicQuestionnaireRepository(db), guard);
+         Questionnaires = new QuestionnaireService(ctx, qRepo, db, guard, user, audit, Base.Clock, definitionProvider, new NoopSecurityNotificationService());
+-        Dashboard = new DashboardService(patients, doctors, appts, qRepo, guard, Base.Clock);
++        Dashboard = new DashboardService(patients, doctors, appts, qRepo, guard, Base.Clock, definitionProvider);
+         Documents = new DocumentService(ctx, docRepo, storage ?? new FakeFileStorage(), db, guard, user, audit, Base.Clock);
+         Reports = new ReportService(ctx, noteRepo, medRepo, symRepo, szRepo, fallRepo, qRepo, docRepo,
+-            new OrganizationRepository(db), guard, audit, Base.Clock);
++            new OrganizationRepository(db), guard, audit, Base.Clock, definitionProvider);
+     }
+ 
+     public void Dispose() => Base.Dispose();
+@@ -198,6 +198,27 @@
+ 
+     private static SaveMedicationDto Med(string name = "Levodopa") => new()
+     { Name = name, Dosage = "100 mg", Frequency = "3x ao dia", StartDate = new DateTime(2026, 3, 1) };
++
++    [Fact]
++    public async Task Editing_medication_preserves_configured_reminders_and_allows_explicit_disable()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        using var env = new ClinicalEnv(database, Doctor(s));
++        var form = Med(); form.ReminderEnabled = true; form.ReminderTimes = "20:00,08:00,08:00";
++        var id = await env.Medications.CreateAsync(s.PatientA1, form);
++        var edit = (await env.Medications.GetForEditAsync(id)).Form;
++        edit.Dosage = "150 mg";
++        await env.Medications.UpdateAsync(id, edit);
++        var saved = Assert.Single(await env.Medications.ListAsync(s.PatientA1));
++        Assert.True(saved.ReminderEnabled);
++        Assert.Equal("08:00,20:00", saved.ReminderTimes);
++        edit.ReminderEnabled = false;
++        await env.Medications.UpdateAsync(id, edit);
++        saved = Assert.Single(await env.Medications.ListAsync(s.PatientA1));
++        Assert.False(saved.ReminderEnabled);
++        Assert.Null(saved.ReminderTimes);
++    }
+ 
+     [Fact]
+     public async Task Doctor_prescribes_and_manages_medication_lifecycle()
+--- a/tests/NeuroCare.Tests/NeuroCare.Tests.csproj
++++ b/tests/NeuroCare.Tests/NeuroCare.Tests.csproj
+@@ -8,6 +8,7 @@
+     <PackageReference Include="xunit" Version="2.9.*" />
+     <PackageReference Include="xunit.runner.visualstudio" Version="3.*" />
+     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.*" />
++    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+   </ItemGroup>
+   <ItemGroup>
+     <Using Include="Xunit" />
+@@ -16,5 +17,6 @@
+     <ProjectReference Include="..\..\src\NeuroCare.Domain\NeuroCare.Domain.csproj" />
+     <ProjectReference Include="..\..\src\NeuroCare.Application\NeuroCare.Application.csproj" />
+     <ProjectReference Include="..\..\src\NeuroCare.Infrastructure\NeuroCare.Infrastructure.csproj" />
++    <ProjectReference Include="..\..\src\NeuroCare.Web\NeuroCare.Web.csproj" />
+   </ItemGroup>
+ </Project>
+--- a/tests/NeuroCare.Tests/QuestionnaireHistoryTests.cs
++++ b/tests/NeuroCare.Tests/QuestionnaireHistoryTests.cs
+@@ -0,0 +1,166 @@
++using Microsoft.EntityFrameworkCore;
++using NeuroCare.Application;
++using NeuroCare.Domain;
++using NeuroCare.Infrastructure;
++
++namespace NeuroCare.Tests;
++
++public class QuestionnaireHistoryTests
++{
++    private static SaveClinicQuestionnaireDto Form(string title = "Sono original") => new()
++    {
++        Key = "sono-clinica", Title = title, Description = "Acompanhamento do sono",
++        Items = [new() { Text = "Pergunta original", Options = "0=Não;1=Sim" }],
++        Bands = [new() { Min = 0, Max = 1, Label = "Faixa original" }],
++        SafetyItemNumber = 1
++    };
++
++    private static ClinicQuestionnaireService Definitions(ClinicalEnv env)
++    {
++        var db = env.Base.Db;
++        var audit = new AuditService(new AuditLogRepository(db), env.Base.User, env.Base.Clock, db);
++        return new(new ClinicQuestionnaireRepository(db), db, new AccessGuard(env.Base.User), audit,
++            new QuestionnaireResponseRepository(db));
++    }
++
++    [Theory]
++    [InlineData(2, false)]
++    [InlineData(1, true)]
++    [InlineData(0, false)]
++    public async Task Score_bands_require_continuous_non_overlapping_coverage(int secondMin, bool valid)
++    {
++        var database = Guid.NewGuid().ToString();
++        var scenario = await TestEnv.SeedAsync(database);
++        using var env = new ClinicalEnv(database, FakeCurrentUser.With(Roles.Doctor, scenario.OrgA, scenario.DoctorAUserId));
++        var form = Form();
++        form.Items[0].Options = "0=Nunca;1=Às vezes;2=Sempre";
++        form.Bands = [new() { Min = 0, Max = 0, Label = "Baixa" }, new() { Min = secondMin, Max = 2, Label = "Alta" }];
++        if (valid)
++            Assert.NotEqual(Guid.Empty, await Definitions(env).CreateAsync(form));
++        else
++        {
++            await Assert.ThrowsAsync<RequestValidationException>(() => Definitions(env).CreateAsync(form));
++            Assert.Empty(await env.Base.Db.ClinicQuestionnaires.ToListAsync());
++        }
++    }
++
++    [Fact]
++    public async Task Editing_definition_preserves_old_answers_titles_and_maximum_in_all_views()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        using var env = new ClinicalEnv(database, FakeCurrentUser.With(Roles.Doctor, s.OrgA, s.DoctorAUserId));
++        var definitions = Definitions(env);
++        var id = await definitions.CreateAsync(Form());
++        var old = await env.Questionnaires.SubmitAsync(s.PatientA1, "sono-clinica", new Dictionary<int, int> { [0] = 1 });
++
++        var changed = Form("Sono revisado");
++        changed.Items = [new() { Text = "Pergunta diferente", Options = "0=Nunca;2=Frequentemente" }];
++        changed.Bands = [new() { Min = 0, Max = 2, Label = "Nova faixa" }];
++        await definitions.UpdateAsync(id, changed);
++        env.Base.Db.ChangeTracker.Clear();
++
++        var result = await env.Questionnaires.GetResultAsync(old.Id);
++        Assert.Equal("Sono original", result.Title);
++        Assert.Equal(1, result.MaxScore);
++        Assert.Equal("Pergunta original", Assert.Single(result.Answers).Question);
++        Assert.Equal("Sim", Assert.Single(result.Answers).Answer);
++        Assert.Equal("Faixa original", result.BandLabel);
++        Assert.Equal("Sono original", Assert.Single(await env.Questionnaires.ListResponsesAsync(s.PatientA1, null, 365)).Title);
++        Assert.Equal("Sono original", Assert.Single((await env.Reports.GetPatientSummaryAsync(s.PatientA1, 90)).Questionnaires).Title);
++        Assert.Contains(await env.Timeline.GetAsync(s.PatientA1), x => x.Title == "Questionário: Sono original");
++        Assert.Equal("Sono original", Assert.Single((await env.Dashboard.GetAsync()).SafetyAlerts).QuestionnaireTitle);
++
++        var next = await env.Questionnaires.SubmitAsync(s.PatientA1, "sono-clinica", new Dictionary<int, int> { [0] = 2 });
++        Assert.Equal("Sono revisado", next.Title);
++        Assert.Equal(2, next.MaxScore);
++        Assert.Equal("Frequentemente", Assert.Single(next.Answers).Answer);
++        Assert.Equal("Sono original", (await env.Questionnaires.GetResultAsync(old.Id)).Title);
++    }
++
++    [Fact]
++    public async Task Editing_backfills_legacy_responses_only_in_its_organization()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        Guid id, ownResponse;
++        using (var doctor = new ClinicalEnv(database, FakeCurrentUser.With(Roles.Doctor, s.OrgA, s.DoctorAUserId)))
++        {
++            id = await Definitions(doctor).CreateAsync(Form());
++            ownResponse = (await doctor.Questionnaires.SubmitAsync(s.PatientA1, "sono-clinica", new Dictionary<int, int> { [0] = 1 })).Id;
++        }
++        Guid otherResponse;
++        using (var system = new TestEnv(database, FakeCurrentUser.System()))
++        {
++            var own = await system.Db.QuestionnaireResponses.IgnoreQueryFilters().SingleAsync(x => x.Id == ownResponse);
++            own.DefinitionSnapshotJson = null;
++            var other = new QuestionnaireResponse
++            {
++                OrganizationId = s.OrgB, PatientId = s.PatientB1, QuestionnaireKey = "sono-clinica",
++                AnswersJson = "[1]", TotalScore = 1, BandLabel = "Outra organização", AnsweredAtUtc = system.Clock.UtcNow
++            };
++            otherResponse = other.Id;
++            system.Db.QuestionnaireResponses.Add(other);
++            await system.Db.SaveChangesAsync();
++        }
++        using (var doctor = new ClinicalEnv(database, FakeCurrentUser.With(Roles.Doctor, s.OrgA, s.DoctorAUserId)))
++        {
++            await Definitions(doctor).UpdateAsync(id, Form("Título modificado"));
++            Assert.Equal("Sono original", (await doctor.Questionnaires.GetResultAsync(ownResponse)).Title);
++            await Definitions(doctor).UpdateAsync(id, Form("Outra edição"));
++            Assert.Equal("Sono original", (await doctor.Questionnaires.GetResultAsync(ownResponse)).Title);
++        }
++        using var inspect = new TestEnv(database, FakeCurrentUser.System());
++        Assert.NotNull((await inspect.Db.QuestionnaireResponses.IgnoreQueryFilters().SingleAsync(x => x.Id == ownResponse)).DefinitionSnapshotJson);
++        Assert.Null((await inspect.Db.QuestionnaireResponses.IgnoreQueryFilters().SingleAsync(x => x.Id == otherResponse)).DefinitionSnapshotJson);
++    }
++
++    [Fact]
++    public async Task Inactive_definition_keeps_history_but_rejects_new_responses()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        using var env = new ClinicalEnv(database, FakeCurrentUser.With(Roles.Doctor, s.OrgA, s.DoctorAUserId));
++        var service = Definitions(env);
++        var id = await service.CreateAsync(Form());
++        var response = await env.Questionnaires.SubmitAsync(s.PatientA1, "sono-clinica", new Dictionary<int, int> { [0] = 0 });
++        var inactive = Form(); inactive.Active = false;
++        await service.UpdateAsync(id, inactive);
++        Assert.Equal("Sono original", (await env.Questionnaires.GetResultAsync(response.Id)).Title);
++        await Assert.ThrowsAsync<NotFoundException>(() => env.Questionnaires.SubmitAsync(s.PatientA1, "sono-clinica", new Dictionary<int, int> { [0] = 0 }));
++    }
++
++    [Fact]
++    public async Task Legacy_built_in_response_remains_readable_without_snapshot()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        using var env = new ClinicalEnv(database, FakeCurrentUser.With(Roles.Patient, s.OrgA, s.PatientA1UserId));
++        var result = await env.Questionnaires.SubmitAsync(null, "gad7", Enumerable.Range(0, 7).ToDictionary(x => x, _ => 1));
++        var stored = await env.Base.Db.QuestionnaireResponses.SingleAsync();
++        stored.DefinitionSnapshotJson = null;
++        await env.Base.Db.SaveChangesAsync();
++        var legacy = await env.Questionnaires.GetResultAsync(result.Id);
++        Assert.Equal(QuestionnaireCatalog.Gad7.Title, legacy.Title);
++        Assert.Equal(7, legacy.Answers.Count);
++        Assert.Equal(21, legacy.MaxScore);
++    }
++
++    [Fact]
++    public async Task Snapshot_preserves_professional_access_restriction_after_definition_changes()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        Guid responseId;
++        using (var doctor = new ClinicalEnv(database, FakeCurrentUser.With(Roles.Doctor, s.OrgA, s.DoctorAUserId)))
++        {
++            var form = Form(); form.ClinicianOnly = true;
++            var id = await Definitions(doctor).CreateAsync(form);
++            responseId = (await doctor.Questionnaires.SubmitAsync(s.PatientA1, form.Key, new Dictionary<int, int> { [0] = 1 })).Id;
++            form.ClinicianOnly = false;
++            await Definitions(doctor).UpdateAsync(id, form);
++        }
++        using var patient = new ClinicalEnv(database, FakeCurrentUser.With(Roles.Patient, s.OrgA, s.PatientA1UserId));
++        await Assert.ThrowsAsync<ForbiddenException>(() => patient.Questionnaires.GetResultAsync(responseId));
++    }
++}
+--- a/tests/NeuroCare.Tests/ReminderWorkerTests.cs
++++ b/tests/NeuroCare.Tests/ReminderWorkerTests.cs
+@@ -0,0 +1,150 @@
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using NeuroCare.Application;
++using NeuroCare.Domain;
++using NeuroCare.Infrastructure;
++
++namespace NeuroCare.Tests;
++
++public class ReminderWorkerTests
++{
++    private static ServiceProvider Services(string database, FakeEmailSender email, FakeClock clock) => new ServiceCollection()
++        .AddSingleton<ICurrentUser>(FakeCurrentUser.System())
++        .AddSingleton<IClock>(clock).AddSingleton<IEmailSender>(email)
++        .AddDbContext<NeuroCareDbContext>(o => o.UseInMemoryDatabase(database))
++        .BuildServiceProvider();
++
++    private static ReminderWorker Worker(ServiceProvider services) => new(
++        services.GetRequiredService<IServiceScopeFactory>(),
++        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
++        { ["Notifications:RequireConsent"] = "true" }).Build(), NullLogger<ReminderWorker>.Instance);
++
++    private static async Task AddRecipientAndConsent(TestEnv env, Scenario s, string mode)
++    {
++        env.Db.Users.Add(new ApplicationUser
++        {
++            Id = s.PatientA1UserId, OrganizationId = mode == "wrong-user-organization" ? s.OrgB : s.OrgA,
++            FullName = "Paciente de teste", UserName = "patient@example.test", Email = "patient@example.test",
++            EmailConfirmed = true, Active = mode != "inactive-user"
++        });
++        var purpose = ConsentPurposeCatalog.Find("notifications-email")!;
++        env.Db.ConsentRecords.Add(new ConsentRecord
++        {
++            OrganizationId = s.OrgA, PatientId = s.PatientA1, PurposeKey = purpose.Key,
++            Version = mode == "old-consent" ? "0.1" : purpose.Version,
++            Status = mode == "revoked-consent" ? ConsentStatus.Revoked : ConsentStatus.Granted,
++            GrantedAtUtc = env.Clock.UtcNow.AddDays(-1), PurposeText = purpose.Text
++        });
++        if (mode == "inactive-organization")
++            (await env.Db.Organizations.SingleAsync(x => x.Id == s.OrgA)).Active = false;
++        if (mode == "inactive-patient")
++            (await env.Db.Patients.IgnoreQueryFilters().SingleAsync(x => x.Id == s.PatientA1)).Status = PatientStatus.Inactive;
++        await env.Db.SaveChangesAsync();
++    }
++
++    [Theory]
++    [InlineData("eligible", 2)]
++    [InlineData("inactive-organization", 0)]
++    [InlineData("inactive-patient", 0)]
++    [InlineData("inactive-user", 0)]
++    [InlineData("wrong-user-organization", 0)]
++    [InlineData("old-consent", 0)]
++    [InlineData("revoked-consent", 0)]
++    public async Task Reminders_require_active_matching_recipient_and_current_consent(string mode, int expected)
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        var clock = new FakeClock();
++        using (var env = new TestEnv(database, FakeCurrentUser.System()))
++        {
++            await AddRecipientAndConsent(env, s, mode);
++            env.Db.Appointments.Add(new Appointment
++            {
++                OrganizationId = s.OrgA, PatientId = s.PatientA1, DoctorId = s.DoctorA,
++                StartsAtUtc = clock.UtcNow.AddHours(1)
++            });
++            env.Db.Medications.Add(new Medication
++            {
++                OrganizationId = s.OrgA, PatientId = s.PatientA1, Name = "Medicação teste", Dosage = "100 mg",
++                Frequency = "1x", StartDate = clock.ToLocal(clock.UtcNow).Date,
++                ReminderEnabled = true, ReminderTimes = "12:00"
++            });
++            await env.Db.SaveChangesAsync();
++        }
++        var email = new FakeEmailSender();
++        using var services = Services(database, email, clock);
++        using var worker = Worker(services);
++        await worker.ProcessAsync();
++        Assert.Equal(expected, email.Sent.Count);
++        await worker.ProcessAsync();
++        Assert.Equal(expected, email.Sent.Count); // already sent occurrences must not repeat
++        using var inspect = new TestEnv(database, FakeCurrentUser.System());
++        var dispatches = await inspect.Db.NotificationDispatches.IgnoreQueryFilters().ToListAsync();
++        Assert.Equal(expected, dispatches.Count);
++        Assert.All(dispatches, x => { Assert.Equal(s.OrgA, x.OrganizationId); Assert.Equal(NotificationStatus.Sent, x.Status); });
++    }
++
++    [Fact]
++    public async Task Appointment_scan_reaches_records_beyond_the_previous_global_limit()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        var clock = new FakeClock();
++        using (var env = new TestEnv(database, FakeCurrentUser.System()))
++        {
++            await AddRecipientAndConsent(env, s, "eligible");
++            for (var i = 0; i < 1001; i++)
++                env.Db.Appointments.Add(new Appointment
++                {
++                    OrganizationId = s.OrgA, PatientId = s.PatientA2, DoctorId = s.DoctorA,
++                    StartsAtUtc = clock.UtcNow.AddMinutes(1)
++                });
++            env.Db.Appointments.Add(new Appointment
++            {
++                OrganizationId = s.OrgA, PatientId = s.PatientA1, DoctorId = s.DoctorA,
++                StartsAtUtc = clock.UtcNow.AddHours(1)
++            });
++            await env.Db.SaveChangesAsync();
++        }
++        var email = new FakeEmailSender();
++        using var services = Services(database, email, clock);
++        using var worker = Worker(services);
++        await worker.ProcessAsync();
++        Assert.Single(email.Sent);
++    }
++
++    [Fact]
++    public async Task Medication_scan_reaches_records_beyond_the_previous_global_limit()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        var clock = new FakeClock();
++        using (var env = new TestEnv(database, FakeCurrentUser.System()))
++        {
++            await AddRecipientAndConsent(env, s, "eligible");
++            for (var i = 0; i < 5001; i++)
++                env.Db.Medications.Add(new Medication
++                {
++                    Id = Guid.Parse($"00000000-0000-0000-0000-{i:x12}"),
++                    OrganizationId = s.OrgA, PatientId = s.PatientA1, Name = "Não vencida", Dosage = "100 mg",
++                    Frequency = "1x", StartDate = clock.ToLocal(clock.UtcNow).Date,
++                    ReminderEnabled = true, ReminderTimes = "13:00"
++                });
++            env.Db.Medications.Add(new Medication
++            {
++                Id = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff"),
++                OrganizationId = s.OrgA, PatientId = s.PatientA1, Name = "Medicação ao final", Dosage = "100 mg",
++                Frequency = "1x", StartDate = clock.ToLocal(clock.UtcNow).Date,
++                ReminderEnabled = true, ReminderTimes = "12:00"
++            });
++            await env.Db.SaveChangesAsync();
++        }
++        var email = new FakeEmailSender();
++        using var services = Services(database, email, clock);
++        using var worker = Worker(services);
++        await worker.ProcessAsync();
++        Assert.Contains("Medicação ao final", System.Net.WebUtility.HtmlDecode(Assert.Single(email.Sent).Body));
++    }
++}
+--- a/tests/NeuroCare.Tests/WebRegressionTests.cs
++++ b/tests/NeuroCare.Tests/WebRegressionTests.cs
+@@ -0,0 +1,254 @@
++using System.Net;
++using System.Security.Claims;
++using System.Text.Encodings.Web;
++using System.Text.RegularExpressions;
++using Microsoft.AspNetCore.Authentication;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Http;
++using Microsoft.AspNetCore.Mvc.Testing;
++using Microsoft.AspNetCore.TestHost;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Infrastructure;
++using Microsoft.Extensions.Configuration;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.DependencyInjection.Extensions;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++using NeuroCare.Application;
++using NeuroCare.Domain;
++using NeuroCare.Infrastructure;
++
++namespace NeuroCare.Tests;
++
++public sealed class ReviewWebFactory(string database, FakeCurrentUser user) : WebApplicationFactory<Program>
++{
++    protected override void ConfigureWebHost(IWebHostBuilder builder)
++    {
++        builder.UseEnvironment("Development");
++        builder.UseSetting("ConnectionStrings:DefaultConnection", "Server=127.0.0.1;Database=Review;Integrated Security=true");
++        builder.UseSetting("Database:AutoInitialize", "false");
++        builder.UseSetting("Notifications:Enabled", "false");
++        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
++        {
++            ["ConnectionStrings:DefaultConnection"] = "Server=127.0.0.1;Database=Review;Integrated Security=true",
++            ["Database:AutoInitialize"] = "false", ["Notifications:Enabled"] = "false", ["Seed:Enabled"] = "false"
++        }));
++        builder.ConfigureTestServices(services =>
++        {
++            services.RemoveAll<DbContextOptions<NeuroCareDbContext>>();
++            services.RemoveAll<IDbContextOptionsConfiguration<NeuroCareDbContext>>();
++            services.AddDbContext<NeuroCareDbContext>(o => o.UseInMemoryDatabase(database));
++            services.AddSingleton(user);
++            services.AddSingleton<IClock, FakeClock>();
++            services.AddSingleton<IStartupFilter, ReviewRemoteIpFilter>();
++            services.AddSingleton<IFileStorage>(new FakeFileStorage { MaxFileBytes = 2 * 1048576 });
++            services.AddAuthentication(o =>
++            {
++                o.DefaultAuthenticateScheme = "Review";
++                o.DefaultChallengeScheme = "Review";
++            }).AddScheme<AuthenticationSchemeOptions, ReviewAuthenticationHandler>("Review", _ => { });
++        });
++    }
++}
++
++// Header used exclusively by TestServer to simulate independent client connections.
++public sealed class ReviewRemoteIpFilter : IStartupFilter
++{
++    public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
++    {
++        app.Use((context, continuation) =>
++        {
++            if (IPAddress.TryParse(context.Request.Headers["X-Review-IP"], out var ip))
++                context.Connection.RemoteIpAddress = ip;
++            return continuation(context);
++        });
++        next(app);
++    };
++}
++
++public sealed class ReviewAuthenticationHandler(
++    IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger,
++    UrlEncoder encoder, FakeCurrentUser user) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
++{
++    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
++    {
++        if (!user.IsAuthenticated) return Task.FromResult(AuthenticateResult.NoResult());
++        var claims = user.RoleSet.Select(role => new Claim(ClaimTypes.Role, role)).ToList();
++        claims.Add(new Claim(ClaimTypes.NameIdentifier, user.UserId!.Value.ToString()));
++        claims.Add(new Claim(ClaimTypes.Name, "Usuário de teste"));
++        if (user.OrganizationId is Guid org) claims.Add(new Claim(AppClaims.OrganizationId, org.ToString()));
++        return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(
++            new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name)), Scheme.Name)));
++    }
++}
++
++public class WebRegressionTests
++{
++    [Fact]
++    public async Task Medication_edit_form_round_trip_keeps_reminders_and_can_disable_them()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        var user = FakeCurrentUser.With(Roles.Doctor, s.OrgA, s.DoctorAUserId);
++        Guid id;
++        using (var env = new ClinicalEnv(database, user))
++            id = await env.Medications.CreateAsync(s.PatientA1, new SaveMedicationDto
++            {
++                Name = "Medicação teste", Dosage = "100 mg", Frequency = "2x ao dia",
++                StartDate = new DateTime(2026, 3, 1), ReminderEnabled = true, ReminderTimes = "08:00,20:00"
++            });
++
++        await using var factory = new ReviewWebFactory(database, user);
++        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
++        var html = await client.GetStringAsync($"/Medications/Edit/{id}");
++        Assert.Contains("Questionários da clínica", html);
++        Assert.DoesNotContain("em breve", html);
++        var fields = Inputs(html);
++        Assert.Contains(fields, x => x.Key == "ReminderEnabled" && x.Value == "true");
++        Assert.Contains(fields, x => x.Key == "ReminderTimes" && x.Value == "08:00,20:00");
++        Replace(fields, "Dosage", "150 mg");
++        using var response = await client.PostAsync($"/Medications/Edit/{id}", new FormUrlEncodedContent(fields));
++        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
++        using (var env = new ClinicalEnv(database, user))
++        {
++            var saved = Assert.Single(await env.Medications.ListAsync(s.PatientA1));
++            Assert.True(saved.ReminderEnabled);
++            Assert.Equal("08:00,20:00", saved.ReminderTimes);
++            Assert.Equal("150 mg", saved.Dosage);
++        }
++
++        fields = Inputs(await client.GetStringAsync($"/Medications/Edit/{id}"));
++        fields.RemoveAll(x => x.Key == "ReminderEnabled" && x.Value == "true");
++        using var disabled = await client.PostAsync($"/Medications/Edit/{id}", new FormUrlEncodedContent(fields));
++        Assert.Equal(HttpStatusCode.Redirect, disabled.StatusCode);
++        using var inspect = new ClinicalEnv(database, user);
++        var item = Assert.Single(await inspect.Medications.ListAsync(s.PatientA1));
++        Assert.False(item.ReminderEnabled);
++        Assert.Null(item.ReminderTimes);
++    }
++
++    [Fact]
++    public async Task Patient_menu_exposes_privacy_and_implemented_clinical_pages()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        await using var factory = new ReviewWebFactory(database, FakeCurrentUser.With(Roles.Patient, s.OrgA, s.PatientA1UserId));
++        using var client = factory.CreateClient();
++        var html = await client.GetStringAsync("/PatientPortal");
++        Assert.Contains("href=\"/Lgpd\"", html);
++        Assert.Contains("href=\"/Falls\"", html);
++        Assert.Contains("href=\"/Questionnaires\"", html);
++        Assert.Contains("href=\"/Documents\"", html);
++        Assert.DoesNotContain("Questionários da clínica", html);
++        using var privacy = await client.GetAsync("/Lgpd");
++        Assert.Equal(HttpStatusCode.OK, privacy.StatusCode);
++    }
++
++    [Fact]
++    public async Task Report_page_renders_patient_summary_and_print_controls()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        await using var factory = new ReviewWebFactory(database, FakeCurrentUser.With(Roles.Doctor, s.OrgA, s.DoctorAUserId));
++        using var client = factory.CreateClient();
++        var html = await client.GetStringAsync($"/Reports?patientId={s.PatientA1}");
++        Assert.Contains("Resumo do prontu", html);
++        Assert.Contains("Paciente A1", html);
++        Assert.Contains("data-print", html);
++        Assert.Contains("no-print", html);
++        var artifacts = Environment.GetEnvironmentVariable("NEUROCARE_HTTP_ARTIFACTS");
++        if (!string.IsNullOrWhiteSpace(artifacts))
++        {
++            Directory.CreateDirectory(artifacts);
++            await File.WriteAllTextAsync(Path.Combine(artifacts, "report.html"), html);
++        }
++    }
++
++    [Fact]
++    public async Task Login_rate_limit_is_partitioned_by_client_address()
++    {
++        await using var factory = new ReviewWebFactory(Guid.NewGuid().ToString(), FakeCurrentUser.System());
++        using var client = factory.CreateClient(new() { AllowAutoRedirect = false });
++        for (var i = 0; i < 11; i++)
++        {
++            using var request = new HttpRequestMessage(HttpMethod.Post, "/Account/Login");
++            request.Headers.Add("X-Review-IP", "192.0.2.10");
++            using var response = await client.SendAsync(request);
++            // Without an antiforgery token, accepted requests fail with 400 before account authentication.
++            Assert.Equal(i < 10 ? HttpStatusCode.BadRequest : HttpStatusCode.TooManyRequests, response.StatusCode);
++        }
++        using var other = new HttpRequestMessage(HttpMethod.Post, "/Account/Login");
++        other.Headers.Add("X-Review-IP", "192.0.2.11");
++        using var independent = await client.SendAsync(other);
++        Assert.Equal(HttpStatusCode.BadRequest, independent.StatusCode);
++    }
++
++    [Fact]
++    public async Task Upload_page_uses_configured_limit_and_loads_client_validation()
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        await using var factory = new ReviewWebFactory(database, FakeCurrentUser.With(Roles.Patient, s.OrgA, s.PatientA1UserId));
++        using var client = factory.CreateClient();
++        var html = await client.GetStringAsync("/Documents/Upload");
++        Assert.Contains("data-max-bytes=\"2097152\"", html);
++        Assert.Contains("data-error-target=\"file-error\"", html);
++        Assert.Contains("/js/upload-check.js", html);
++    }
++
++    [Theory]
++    [InlineData("phq9", true)]
++    [InlineData("seguranca-clinica", false)]
++    public async Task Safety_messages_preserve_phq9_guidance_without_misinterpreting_custom_questions(string key, bool selfHarm)
++    {
++        var database = Guid.NewGuid().ToString();
++        var s = await TestEnv.SeedAsync(database);
++        Guid responseId;
++        using (var doctor = new ClinicalEnv(database, FakeCurrentUser.With(Roles.Doctor, s.OrgA, s.DoctorAUserId)))
++        {
++            if (!selfHarm)
++            {
++                doctor.Base.Db.ClinicQuestionnaires.Add(new ClinicQuestionnaire
++                {
++                    OrganizationId = s.OrgA, Key = key, Title = "Segurança", Description = "Acompanhamento",
++                    Prompt = "Como está hoje?", QuestionsJson = "[{\"Text\":\"Você caiu hoje?\",\"Options\":[{\"Value\":0,\"Label\":\"Não\"},{\"Value\":1,\"Label\":\"Sim\"}]}]",
++                    BandsJson = "[]", SafetyItemIndex = 0
++                });
++                await doctor.Base.Db.SaveChangesAsync();
++            }
++            var count = selfHarm ? 9 : 1;
++            responseId = (await doctor.Questionnaires.SubmitAsync(s.PatientA1, key,
++                Enumerable.Range(0, count).ToDictionary(i => i, _ => 1))).Id;
++        }
++        await using var factory = new ReviewWebFactory(database, FakeCurrentUser.With(Roles.Patient, s.OrgA, s.PatientA1UserId));
++        using var client = factory.CreateClient();
++        var html = await client.GetStringAsync($"/Questionnaires/Result/{responseId}");
++        Assert.Contains("192", html);
++        Assert.Equal(selfHarm, html.Contains("CVV", StringComparison.Ordinal));
++        if (!selfHarm) Assert.Contains("item de seguran", html);
++    }
++
++    private static List<KeyValuePair<string, string>> Inputs(string html)
++    {
++        html = Regex.Matches(html, "<form\\b[^>]*>[\\s\\S]*?</form>", RegexOptions.IgnoreCase)
++            .Single(form => form.Value.Contains("action=\"/Medications/Edit/", StringComparison.Ordinal)).Value;
++        var fields = new List<KeyValuePair<string, string>>();
++        foreach (Match tag in Regex.Matches(html, "<input\\b[^>]*>", RegexOptions.IgnoreCase))
++        {
++            var attrs = Regex.Matches(tag.Value, "([\\w-]+)=\"([^\"]*)\"")
++                .ToDictionary(x => x.Groups[1].Value, x => WebUtility.HtmlDecode(x.Groups[2].Value), StringComparer.OrdinalIgnoreCase);
++            if (!attrs.TryGetValue("name", out var name)) continue;
++            attrs.TryGetValue("type", out var type);
++            if (type == "checkbox" && !Regex.IsMatch(tag.Value, "\\bchecked(?:=|\\s|>)")) continue;
++            fields.Add(new(name, attrs.GetValueOrDefault("value", "")));
++        }
++        return fields;
++    }
++
++    private static void Replace(List<KeyValuePair<string, string>> fields, string name, string value)
++    {
++        fields.RemoveAll(x => x.Key == name);
++        fields.Add(new(name, value));
++    }
++}

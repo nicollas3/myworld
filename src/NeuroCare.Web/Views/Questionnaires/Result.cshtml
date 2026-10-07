@@ -1,0 +1,53 @@
+@model QuestionnaireResultDto
+@{
+    ViewData["Title"] = "Resultado";
+    var isDoctor = User.IsInRole(Roles.Doctor);
+    Guid? backPatientId = isDoctor ? Model.PatientId : null;
+}
+<partial name="_ClinicalHeader" />
+@if (Model.SafetyFlag)
+{
+    @if (isDoctor)
+    {
+        <div class="alert alert-danger" role="alert">
+            <strong>Atenção:</strong> o paciente respondeu positivamente ao item de segurança deste questionário. Revise o caso com o paciente.
+        </div>
+    }
+    else if (string.Equals(Model.Key, "phq9", StringComparison.OrdinalIgnoreCase))
+    {
+        <div class="alert alert-danger" role="alert">
+            <strong>Você não está sozinho(a).</strong> Se você está pensando em se machucar, procure ajuda agora:
+            ligue para o <strong>CVV, 188</strong> (24 horas, gratuito) ou para o <strong>SAMU, 192</strong>, ou vá ao serviço de saúde mais próximo.
+            Avise também alguém de confiança e a sua equipe de saúde.
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-warning" role="alert">
+            Sua resposta marcou o item de segurança deste questionário. Entre em contato com sua equipe de saúde para orientação.
+            Se houver uma emergência, procure atendimento imediato ou ligue para o SAMU, 192.
+        </div>
+    }
+}
+<div class="card mb-3"><div class="card-body">
+    <h2 class="h5">@Model.Title</h2>
+    <div class="display-6">@Model.TotalScore <small class="text-muted fs-6">de @Model.MaxScore</small></div>
+    <div>Faixa de pontuação: <strong>@Model.BandLabel</strong></div>
+    <div class="small text-muted mt-1">Respondido em @Model.AnsweredAtLocal.ToString("dd/MM/yyyy HH:mm")</div>
+    <div class="small text-muted mt-2">@Model.Disclaimer</div>
+</div></div>
+
+@if (isDoctor)
+{
+    <div class="card"><div class="table-responsive">
+    <table class="table mb-0 align-middle">
+        <thead><tr><th>Pergunta</th><th>Resposta</th></tr></thead>
+        <tbody>
+        @foreach (var a in Model.Answers)
+        {
+            <tr><td class="text-break">@a.Question</td><td>@a.Answer</td></tr>
+        }
+        </tbody>
+    </table></div></div>
+}
+<a class="btn btn-outline-secondary mt-3" asp-action="Index" asp-route-patientId="@backPatientId">Voltar</a>

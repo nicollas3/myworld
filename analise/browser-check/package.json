@@ -1,0 +1,11 @@
+{
+  "name": "neurocare-validacao-dom",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "check": "node check-password.cjs && node check-upload.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}
